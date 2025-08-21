@@ -364,7 +364,8 @@ For issues and questions:
 ### Screenshots
 ![Upload Interface](screenshots/upload.png)
 ![Question Customization](screenshots/advanced.png) 
-![Generated PDF Sample](screenshots/output.png)
+![Generated PDF Sample](screenshots/output1.png)
+![Generated PDF Sample](screenshots/output2.png)
 
 ### Live Demo
 [Try it here](your-deployed-url) (Note: Requires OpenAI API key)
