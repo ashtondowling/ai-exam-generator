@@ -1,9 +1,12 @@
 FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1
 
-# Install dependencies and tectonic
+# Install dependencies and required libraries for tectonic
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates && \
+    apt-get install -y --no-install-recommends \
+        curl ca-certificates \
+        libgraphite2-3 libharfbuzz0b libfontconfig1 libfreetype6 \
+        libjpeg62-turbo libpng16-16 libtiff6 libicu72 && \
     rm -rf /var/lib/apt/lists/*
 
 # Download and install specific tectonic release (more reliable than dynamic fetch)
