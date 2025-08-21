@@ -11,5 +11,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Expose via Gunicorn; replace entrypoint if you use app vs factory
-CMD ["gunicorn","-w","2","-k","gthread","--threads","4","-b","0.0.0.0:10000","IGOTITBACKYAY:website()"]
+# replace the CMD in your Dockerfile with this shell form so $PORT works
+CMD sh -lc 'gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:$PORT "exam:website()"'
+
