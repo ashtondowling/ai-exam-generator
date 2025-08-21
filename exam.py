@@ -9,25 +9,26 @@ except Exception:
     pdfplumber = None
 from pptx import Presentation
 from striprtf.striprtf import rtf_to_text
-import shutil
 from openai import OpenAI
 import hashlib
 from flask import g, Response
 import unicodedata
 import math
-from concurrent.futures import ThreadPoolExecutor
 import random
-import re
 from werkzeug.utils import secure_filename
 from uuid import uuid4
 from threading import Lock
-import json       # (if not added in Stage 4)
-import tempfile
+import json
 import zipfile
-import os
 import time
 from collections import deque
 import logging
+import re
+import shutil, subprocess, tempfile, os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import BoundedSemaphore
+_TEX_PAR = int(os.getenv("APP_TEX_PARALLEL", "1"))
+_TEX_SEM = BoundedSemaphore(max(1, _TEX_PAR))
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -111,7 +112,6 @@ ZIP_COMPRESSION_RATIO_MAX= env_float("APP_ZIP_RATIO_MAX", 200.0)
 MAX_CONTENT_LENGTH       = TOTAL_UPLOAD_MB * 1024 * 1024  # Flask body cap (kept)
 
 def _detect_tectonic_cmd():
-    import shutil, subprocess, tempfile, os
     global _TECTONIC_CMD
     if _TECTONIC_CMD is not None:
         return _TECTONIC_CMD
@@ -122,10 +122,11 @@ def _detect_tectonic_cmd():
     with open(tex_path, "w", encoding="utf-8") as f:
         f.write("\\documentclass{article}\\begin{document}x\\end{document}")
     try:
-        proc = subprocess.run(
-            ["tectonic","-X","compile","--outdir",td,tex_path],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5
-        )
+        with _TEX_SEM:
+            proc = subprocess.run(
+                ["tectonic","-X","compile","--outdir",td,tex_path],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5
+            )
         _TECTONIC_CMD = "new" if proc.returncode == 0 else "old"
     except Exception:
         _TECTONIC_CMD = "old"
@@ -278,7 +279,6 @@ def ai_fix_latex(text: str, client, model: str = "gpt-4o-mini", max_tokens: int 
         return text
 
 def patch_left_right(text: str) -> str:
-    import re
     def _balance(pair_open, pair_close, left_cmd=r'\\left', right_cmd=r'\\right'):
         opens = len(re.findall(left_cmd + r'\s*' + re.escape(pair_open), text))
         closes = len(re.findall(right_cmd + r'\s*' + re.escape(pair_close), text))
@@ -606,7 +606,6 @@ _VEC_LIKE = r'(?:vec|hat|bar|tilde|overline|underline|dot|ddot|breve|check|grave
 def _fix_veclike_args_in_math(tex: str) -> str:
     r"""Ensure \vec x -> \vec{x}, \hat i -> \hat{i}, etc., and nest properly."""
     def fix(inner: str) -> str:
-        import re
         # \vec x  -> \vec{x}  (and similar for other macros)
         inner = re.sub(rf'\\({_VEC_LIKE})\s*([A-Za-z])\b', r'\\\1{\2}', inner)
         # \vec{\vec x} -> \vec{\vec{x}}  (rare, but makes braces explicit)
@@ -618,7 +617,6 @@ def _fix_veclike_args_in_math(tex: str) -> str:
 def _fix_frac_forms_in_math(tex: str) -> str:
     """Normalize various broken \frac forms to exactly two arguments."""
     def fix(inner: str) -> str:
-        import re
         # 1) Whitespace form: \frac a b  -> \frac{a}{b}
         inner = re.sub(r'\\frac\s+([^\s{}]+)\s+([^\s{}]+)', r'\\frac{\1}{\2}', inner)
 
@@ -644,7 +642,6 @@ def _fix_text_macros_in_math(tex: str) -> str:
       - '\text dm'  -> '\text{dm}'
       - '\frac{\text}{X}' -> '\frac{\text{}}{X}'  (lets later fixers normalize \frac properly)
     """
-    import re
     def fix(inner: str) -> str:
         # 1) \text dm  -> \text{dm}       (single or two-word tokens)
         inner = re.sub(r'\\text\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)', r'\\text{\1}', inner)
@@ -753,6 +750,8 @@ SUMMARY_TOKENS_HARD_MAX      = env_int("APP_SUMMARY_MAX", 800)
 ALWAYS_SAFE_MAIN_Q_INPUT_CAP = env_int("APP_Q_INPUT_CAP", 12_000)
 TARGET_MAX_N_OUT_Q           = env_int("APP_Q_OUT_CAP",   4_000)
 TARGET_MAX_N_OUT_A           = env_int("APP_A_OUT_CAP",   2_500)
+SUM_MIN_K = env_int("APP_SUM_MIN_K", 2)
+SUM_MAX_K = env_int("APP_SUM_MAX_K", 4)
 
 TARGET_MID = 42.0  # More aggressive target
 LOWER = 40.0
@@ -763,7 +762,6 @@ def estimate_compile_seconds() -> float:
     return 5.0
 
 def _emergency_tex_sanitize(tex: str) -> str:
-    import re
     # \frac{\sqrt}{A}{B} -> \frac{\sqrt{A}}{B}
     tex = re.sub(
         r'\\frac\s*\{\s*\\sqrt\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}',
@@ -784,8 +782,8 @@ def plan_summarization_sla(
     raw_avg_tokens: int,
     n_out_q_cap: int,
     n_out_a_cap: int,
-    min_k: int = 4,    # Increased from 2 for more parallelism
-    max_k: int = 12,   # Increased from 6 for better scaling
+        min_k: int = SUM_MIN_K,  # was 4
+        max_k: int = SUM_MAX_K,   # Increased from 6 for better scaling
     hard_min: int = 150,  # Reduced from 200
     hard_max: int = 1200  # Increased from 800 for longer summaries when needed
 ):
@@ -869,7 +867,6 @@ Focus on: formulas, procedures, and computational techniques alongside conceptua
 
 def _fix_sqrt_args_in_math(tex: str) -> str:
     """Ensure \\sqrt has a braced argument inside math."""
-    import re
     def fix(inner: str) -> str:
         # \sqrt x -> \sqrt{x}
         inner = re.sub(r'\\sqrt\s+([A-Za-z0-9+\-*/().])', r'\\sqrt{\1}', inner)
@@ -880,7 +877,6 @@ def _fix_sqrt_args_in_math(tex: str) -> str:
 
 def _fix_frac_sqrt_edgecases_in_math(tex: str) -> str:
     r"""Repair \frac{\sqrt}{A}{B} and \frac{\sqrt}{A} edge cases inside math."""
-    import re
     def fix(inner: str) -> str:
         # \frac{\sqrt}{A}{B} -> \frac{\sqrt{A}}{B}
         inner = re.sub(
@@ -951,12 +947,6 @@ def max_input_tokens_for_main_questions(
     T_left_for_Q = model_budget - T_summaries - T_answers
     N_in_Q_max = 40_000.0 * (T_left_for_Q - 0.6 - (n_out_q_tokens / 80.0))
     return int(max(0, math.floor(N_in_Q_max)))
-
-# =========================
-# PDF image splitting (unchanged core)
-# =========================
-import numpy as np
-from PIL import Image
 
 # --- Stage 9: progress helpers ---
 def fail_progress(job: str, *, pct: int = 97, step: int | None = 5,
@@ -1300,9 +1290,6 @@ def _norm_diff(v: str) -> str | None:
     key = str(v).strip().lower()
     return key if key in DIFF_ALLOWED else None
 
-# --- BEGIN: TeX math sanitizer ---
-import re
-
 def _sanitize_tex_math(src: str) -> str:
     r"""
     Normalize mixed \( … \) and $ … $ math, remove stray $ inside \( … \),
@@ -1390,7 +1377,6 @@ TECTONIC_TIMEOUT = env_int("TECTONIC_TIMEOUT", 45)
 
 def compile_tex_with_tectonic(tex_source: str, *, timeout: int | None = None) -> bytes:
     timeout = TECTONIC_TIMEOUT if timeout is None else timeout
-    import shutil, tempfile, subprocess, os
     if shutil.which("tectonic") is None:
         raise RuntimeError("tectonic not found on PATH (make sure your venv/bin/Scripts dir is on PATH).")
     with tempfile.TemporaryDirectory() as td:
@@ -1403,8 +1389,9 @@ def compile_tex_with_tectonic(tex_source: str, *, timeout: int | None = None) ->
             cmd = ["tectonic", "-X", "compile", "--outdir", td, "--keep-logs", tex_path]
         else:
             cmd = ["tectonic", tex_path, "--keep-logs"]
-        proc = subprocess.run(cmd, cwd=td, timeout=timeout,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        with _TEX_SEM:
+            proc = subprocess.run(cmd, cwd=td, timeout=timeout,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         if proc.returncode != 0 or not os.path.exists(pdf_path):
             log_tail = ""
             log_path = os.path.join(td, "doc.log")
@@ -1421,6 +1408,41 @@ def compile_tex_with_tectonic(tex_source: str, *, timeout: int | None = None) ->
         with open(pdf_path, "rb") as f:
             return f.read()
 
+# near compile_tex_with_tectonic
+def compile_tex_with_tectonic_to_path(tex_source: str, out_path: str, *, timeout: int | None = None) -> None:
+    timeout = TECTONIC_TIMEOUT if timeout is None else timeout
+    if shutil.which("tectonic") is None:
+        raise RuntimeError("tectonic not found on PATH.")
+    with tempfile.TemporaryDirectory() as td:
+        tex_path = os.path.join(td, "doc.tex")
+        with open(tex_path, "w", encoding="utf-8") as f:
+            f.write(tex_source)
+        mode = _detect_tectonic_cmd()
+        cmd = (["tectonic","-X","compile","--outdir",td,"--keep-logs",tex_path]
+               if mode == "new" else
+               ["tectonic", tex_path, "--keep-logs"])
+        with _TEX_SEM:
+            proc = subprocess.run(cmd, cwd=td, timeout=timeout, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        pdf_src = os.path.join(td, "doc.pdf")
+        if proc.returncode != 0 or not os.path.exists(pdf_src):
+            log_tail = ""
+            log_path = os.path.join(td, "doc.log")
+            if os.path.exists(log_path):
+                with open(log_path, "r", encoding="utf-8", errors="ignore") as lf:
+                    log_tail = lf.read()[-4000:]
+            raise RuntimeError(f"Tectonic failed.\n\nSTDOUT:\n{proc.stdout.decode(errors='ignore')}\n\n"
+                               f"STDERR:\n{proc.stderr.decode(errors='ignore')}\n\nLOG tail:\n{log_tail}\n\nTried:\n{cmd}")
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        shutil.move(pdf_src, out_path)
+
+def compile_or_repair_to_path(tex_source: str, out_path: str) -> None:
+    first = _sanitize_tex_math(tex_source)
+    try:
+        return compile_tex_with_tectonic_to_path(first, out_path)
+    except Exception:
+        second = _sanitize_tex_math(first)
+        return compile_tex_with_tectonic_to_path(second, out_path)
+
 def compile_or_repair(tex_source: str, *_, **__) -> bytes:
     # First pass: sanitize & compile
     first = _sanitize_tex_math(tex_source)
@@ -1433,7 +1455,6 @@ def compile_or_repair(tex_source: str, *_, **__) -> bytes:
 
 
 def parallel_map(func, iterable, max_workers=8):
-    from concurrent.futures import ThreadPoolExecutor, as_completed
     results = [None] * len(iterable)
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         futs = {ex.submit(func, i, x): i for i, x in enumerate(iterable)}
@@ -3915,7 +3936,7 @@ refreshSubmitState();
             def _proc(i, p):
                 return i, (preprocessing(p) or "")
 
-            docs_idx_and_text = parallel_map(_proc, filepaths, max_workers=8)
+            docs_idx_and_text = parallel_map(_proc, filepaths, max_workers=2)
             docs_idx_and_text.sort(key=lambda t: t[0])
             docs = [t[1] for t in docs_idx_and_text]
             set_progress(job, 25, step=2, label="Extracting text")
@@ -4192,18 +4213,12 @@ refreshSubmitState();
             a_tex = _emergency_tex_sanitize(a_tex)
             set_progress(job, 90, step=5, label="Compiling PDFs")
             if is_canceled(job): return ("Canceled", 499)
-            with ThreadPoolExecutor(max_workers=2) as ex:
-                fq = ex.submit(compile_or_repair, q_tex, "q")
-                fa = ex.submit(compile_or_repair, a_tex, "a")
-                q_pdf_bytes = fq.result()
-                a_pdf_bytes = fa.result()
-
             q_path = os.path.join(OUTPUT_DIR, "questions.pdf")
             a_path = os.path.join(OUTPUT_DIR, "answers.pdf")
-            with open(q_path, "wb") as f:
-                f.write(q_pdf_bytes)
-            with open(a_path, "wb") as f:
-                f.write(a_pdf_bytes)
+
+            # compile sequentially, directly to disk (no giant in-RAM PDFs)
+            compile_or_repair_to_path(q_tex, q_path)
+            compile_or_repair_to_path(a_tex, a_path)
             _write_run_meta(
                 mode="exam",
                 title=default_title.title(),
