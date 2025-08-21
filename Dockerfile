@@ -10,7 +10,9 @@ RUN apt-get update \
  && curl -fsSL "$url" -o /tmp/tectonic.tar \
  && mkdir -p /opt/tectonic \
  && if echo "$url" | grep -q '\.xz$'; then tar -xJf /tmp/tectonic.tar -C /opt/tectonic --strip-components=1; else tar -xzf /tmp/tectonic.tar -C /opt/tectonic --strip-components=1; fi \
+ && chmod +x /opt/tectonic/tectonic \
  && ln -s /opt/tectonic/tectonic /usr/local/bin/tectonic \
+ && tectonic --version \
  && rm -rf /var/lib/apt/lists/* /tmp/tectonic.tar
 
 WORKDIR /app
@@ -18,5 +20,4 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
-# If you have a factory use website(), else swap to exam:app
 CMD sh -lc 'gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:$PORT "exam:website()"'
