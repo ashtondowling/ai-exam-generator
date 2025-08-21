@@ -1,0 +1,1774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Build a Mock Exam Paper</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+  details#advancedCard.adv-disabled .adv-summary{
+  opacity: .55;
+  cursor: not-allowed;
+  pointer-events: none; /* prevent opening */
+}
+  /* drag & drop affordances */
+.qcard[draggable="true"]{ cursor: grab; }
+.qcard.dragging{ opacity:.6; }
+.qcard.drop-target{ outline:2px dashed var(--brand); outline-offset:2px; }
+/* Advanced question widgets — full-width stacked cards */
+.qgrid{
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.qcard{
+  width: 100%;
+  background: var(--chip);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color .15s, transform .06s ease;
+}
+.qcard:active{ transform: translateY(1px); }
+
+/* header row inside each card */
+.qhead{
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.qleft{ display: flex; align-items: center; gap: 10px; min-width: 0; }
+.qright{ opacity: .75; font-size: .9rem; color: var(--muted); } /* placeholder space */
+
+.qbadge{
+  width: 42px; height: 42px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700;
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+.field.is-disabled { opacity: .58; }
+.qmeta{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+.qtitle{ font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.qtype{ font-size:.9rem; color: var(--muted); }
+
+/* reserved space for future per-question options */
+.qopts{
+  margin-top: 10px;
+  min-height: 44px;                  /* leaves vertical room for controls later */
+  border: 1px dashed var(--border);  /* subtle placeholder; remove later */
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--panel) 92%, transparent);
+}
+
+/* subtle type tinting on the badge */
+.qcard[data-type="Long"]  .qbadge{ background: color-mix(in oklab, var(--brand) 18%, var(--panel)); }
+.qcard[data-type="Short"] .qbadge{ background: color-mix(in oklab, var(--ok)    18%, var(--panel)); }
+.qcard[data-type="MCQ"]   .qbadge{ background: color-mix(in oklab, var(--warn)  18%, var(--panel)); }
+.qcard[data-type="Math"]  .qbadge{ background: color-mix(in oklab, var(--err)   16%, var(--panel)); }
+  /* Styled selects */
+.select {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 36px 10px 12px; /* room for chevron */
+  line-height: 1.2;
+  cursor: pointer;
+  transition: border-color .15s, box-shadow .15s, background-color .15s, transform .06s ease;
+  box-shadow: 0 1px 0 rgba(0,0,0,.04);
+}
+.select:hover { border-color: color-mix(in oklab, var(--border) 60%, var(--brand) 40%); }
+.select:active { transform: translateY(1px); }
+.select:focus { outline: none; }
+.select:focus-visible {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--brand) 30%, transparent);
+}
+
+/* error + disabled states (your JS already toggles .invalid) */
+.select.invalid { border-color: var(--err) !important; }
+.select:disabled { opacity: .6; cursor: not-allowed; }
+
+/* wrapper draws the chevron */
+.select-wrap { position: relative; }
+.select-wrap::after{
+  content:"";
+  position:absolute; right:12px; top:50%;
+  width:10px; height:10px; pointer-events:none;
+  transform: translateY(-50%) rotate(45deg);
+  border-right:2px solid var(--muted);
+  border-bottom:2px solid var(--muted);
+  transition: transform .15s, border-color .15s;
+}
+.select-wrap:focus-within::after{
+  transform: translateY(-50%) rotate(225deg);
+  border-color: var(--brand);
+}
+
+/* hide legacy arrows */
+select::-ms-expand { display:none; }
+
+/* dark dropdown panels (best-effort; some UAs ignore) */
+.select option {
+  background: var(--panel);
+  color: var(--text);
+}
+  .radio-inline { display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
+.radio-inline label { display:flex; align-items:center; gap:6px; }
+  .maker-badge{
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 9999;
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  box-shadow: 0 6px 18px rgba(0,0,0,.12);
+  user-select: none;
+  -webkit-user-select: none;
+}
+@media (max-width: 640px){
+  .maker-badge{ font-size: 0.8rem; padding: 7px 9px; right: 10px; bottom: 10px; }
+}
+  .invalid {
+  border-color: var(--err) !important;
+}
+  /* Make disabled-looking buttons that ignore clicks */
+.btn[aria-disabled="true"] {
+#drop[aria-disabled="true"] { opacity:.55; pointer-events:none; }
+  opacity: .55;
+  pointer-events: none;
+}
+
+.mini-spinner {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 2px solid color-mix(in oklab, var(--text) 20%, transparent);
+  border-top-color: var(--text);
+  display: inline-block; vertical-align: text-bottom;
+  margin-right: 8px; animation: spin 1s linear infinite;
+}
+    textarea{
+      width:100%; padding:10px 12px; background:var(--panel); color:var(--text);
+      border:1px solid var(--border); border-radius:10px; resize:vertical; min-height:120px;
+    }
+    :root{
+      --bg:#0b0c0f; --panel:#12141a; --muted:#a3a8b3; --text:#e9ecf1; --brand:#4f8cff;
+      --ok:#1db954; --warn:#f0b429; --err:#ff5a5f; --border:#1d2230; --chip:#1a1f2b;
+    }
+    @media (prefers-color-scheme: light){
+      :root{
+        --bg:#f7f8fb; --panel:#ffffff; --muted:#5f6b7a; --text:#0d1117; --brand:#3b6dde;
+        --ok:#17a054; --warn:#c79007; --err:#d5484d; --border:#e4e7ee; --chip:#f1f3f8;
+      }
+    }
+    *{box-sizing:border-box}
+    /* Let the document grow and paint the gradient across the whole scroll height */
+html{
+  min-height:100%;
+  background: linear-gradient(180deg, var(--bg), color-mix(in oklab, var(--bg) 80%, #000 20%));
+  background-attachment: fixed;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+               "Apple Color Emoji","Segoe UI Emoji";
+}
+
+body{
+  margin:0;
+  min-height:100%;
+  background: transparent; /* gradient is on <html> */
+  color: var(--text);
+}
+
+button, input, select, textarea { font: inherit; }
+    .wrap{max-width:980px; margin:32px auto; padding:0 16px;}
+    .brand{display:flex; align-items:center; gap:12px; margin-bottom:16px}
+    .logo{width:36px;height:36px;border-radius:8px;background:linear-gradient(135deg,var(--brand),#7aa6ff)}
+    h1{font-size:1.5rem;margin:0}
+    .subtitle{color:var(--muted);margin:4px 0 24px}
+    .grid{display:grid; grid-template-columns: 1.2fr .8fr; gap:18px}
+    @media (max-width:900px){.grid{grid-template-columns:1fr}}
+
+    .card{
+      background:var(--panel); border:1px solid var(--border); border-radius:14px; padding:18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.12);
+    }
+
+    /* Progress Section */
+    .progress-section {
+      margin-top: 20px;
+      padding: 18px;
+      border-radius: 14px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      display: none;
+    }
+    
+    .progress-section.show {
+      display: block;
+    }
+    
+    .progress-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    
+    .progress-bar-container {
+      width: 100%;
+      height: 8px;
+      background: var(--chip);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 12px;
+    }
+    
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--brand), #7aa6ff);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+    
+    .progress-steps {
+      display: grid;
+      gap: 8px;
+    }
+    
+    .progress-step {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      font-size: 0.9rem;
+    }
+    
+    .step-icon {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: bold;
+    }
+    
+    .step-icon.pending {
+      background: var(--chip);
+      color: var(--muted);
+    }
+    
+    .step-icon.active {
+      background: var(--brand);
+      color: white;
+    }
+    
+    .step-icon.complete {
+      background: var(--ok);
+      color: white;
+    }
+    
+    .step-text {
+      flex: 1;
+    }
+    
+    .step-time {
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    
+    .time-estimate {
+      background: var(--chip);
+      padding: 8px 12px;
+      border-radius: 8px;
+      text-align: center;
+      margin-bottom: 16px;
+      font-size: 0.9rem;
+    }
+
+    /* Dropzone */
+    .drop{
+      border:1.5px dashed var(--border); border-radius:14px; padding:24px; text-align:center;
+      background:color-mix(in oklab, var(--panel) 90%, var(--chip) 10%); transition: border-color .15s, background .15s;
+    }
+    .drop.dragover{border-color:var(--brand); background:color-mix(in oklab, var(--chip) 60%, var(--panel) 40%)}
+    .drop p{margin:6px 0 0; color:var(--muted)}
+    .btn{
+      appearance:none; border:1px solid var(--border); background:var(--chip);
+      color:var(--text); padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:600;
+    }
+    .btn.primary{background:var(--brand); border-color:transparent; color:white}
+    .btn.danger{ background: var(--err); border-color: transparent; color:#fff; }
+    .btn.ghost{background:transparent}
+    .btn:disabled{opacity:.6; cursor:not-allowed}
+    .btn-row{display:flex; gap:10px; justify-content:center; margin-top:12px}
+
+    /* File list */
+    .files{display:grid; gap:10px; margin-top:16px}
+    .file{
+      display:flex; align-items:center; gap:12px; padding:10px 12px; border:1px solid var(--border);
+      border-radius:12px; background:var(--chip);
+    }
+    .badge{
+      font-size:.75rem; padding:4px 8px; border-radius:999px; background:var(--panel); border:1px solid var(--border);
+      color:var(--muted);
+    }
+    .file-main{flex:1; min-width:0}
+    .file-name{white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+    .file-meta{font-size:.85rem; color:var(--muted)}
+    .file-remove{border:none; background:transparent; color:var(--err); cursor:pointer; font-weight:700}
+
+    /* Form */
+    .form-row{display:grid; grid-template-columns: 1fr 1fr; gap:12px}
+    .form-row.stacked{grid-template-columns:1fr}
+    .field{display:flex; flex-direction:column; gap:6px}
+    label{font-weight:600}
+    input[type="text"], input[type="number"]{
+      width:100%; padding:10px 12px; background:var(--panel); color:var(--text);
+      border:1px solid var(--border); border-radius:10px;
+    }
+    input[type="number"]{appearance: textfield}
+    .help{color:var(--muted); font-size:.9rem}
+
+    /* Status */
+    .status{margin-top:14px; padding:12px; border-radius:12px; display:none}
+    .status.show{display:block}
+    .status.ok{background:color-mix(in oklab, var(--ok) 15%, transparent); border:1px solid color-mix(in oklab, var(--ok) 60%, var(--border))}
+    .status.err{background:color-mix(in oklab, var(--err) 15%, transparent); border:1px solid color-mix(in oklab, var(--err) 60%, var(--border))}
+    .status.warn{background:color-mix(in oklab, var(--warn) 15%, transparent); border:1px solid color-mix(in oklab, var(--warn) 60%, var(--border))}
+
+    /* Footer */
+    .footer{margin:26px 0 6px; color:var(--muted); font-size:.9rem; text-align:center}
+    .spinner{
+      width:18px;height:18px;border-radius:50%; border:3px solid color-mix(in oklab, var(--text) 20%, transparent);
+      border-top-color: var(--text); animation:spin 1s linear infinite; display:inline-block; vertical-align:middle; margin-right:8px
+    }
+    @keyframes spin{to{transform:rotate(360deg)}}
+    a.link{color:var(--brand); font-weight:600; text-decoration:none}
+    a.link:hover{text-decoration:underline}
+
+    /* Animation for smooth transitions */
+    .fade-in {
+      animation: fadeIn 0.3s ease-in;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+/* Collapsible Advanced header */
+details.card { padding: 0; }                 /* we’ll pad the summary instead */
+.adv-summary {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 14px 18px; cursor: pointer; user-select: none;
+  list-style: none;
+}
+.adv-summary::-webkit-details-marker { display: none; }
+.adv-summary::marker { content: ""; }
+
+/* chevron */
+.adv-summary::after {
+  content:""; width:10px; height:10px; transform: rotate(-45deg);
+  border-right:2px solid var(--muted); border-bottom:2px solid var(--muted);
+  transition: transform .15s, border-color .15s;
+}
+details[open] .adv-summary::after { transform: rotate(45deg); border-color: var(--brand); }
+
+.adv-title { font-size: 1.1rem; font-weight: 700; }
+.adv-count { color: var(--muted); font-size: 0.9rem; }
+
+.adv-body { padding: 0 18px 16px; }
+.adv-summary{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  cursor: pointer;
+  user-select: none;
+  /* remove the old space-between if you had it */
+  justify-content: flex-start;   /* <- ensures items don't spread */
+}
+
+/* Push the count to the right, just before the chevron */
+.adv-count{
+  margin-left: auto;             /* <- moves it to the right edge */
+  margin-right: 8px;             /* small gap before the chevron */
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+/* Keep the chevron pinned at the far right as before */
+.adv-summary::after{
+  content:"";
+  width:10px; height:10px; transform: rotate(-45deg);
+  border-right:2px solid var(--muted); border-bottom:2px solid var(--muted);
+  transition: transform .15s, border-color .15s;
+}
+details[open] .adv-summary::after{
+  transform: rotate(45deg);
+  border-color: var(--brand);
+}
+/* --- Advanced controls box --- */
+.adv-controls{
+  margin: 8px 0 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--chip);
+}
+.adv-checks{
+  display: grid;
+  gap: 10px;
+  margin: 0; padding: 0;
+  border: 0;
+}
+.adv-checks .chk{
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sr-only{
+  position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+  overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0;
+}
+/* qopts layout: Topic | Difficulty | Type */
+.qopts{
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--panel) 92%, transparent);
+}
+.qrow{
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1.2fr; /* Topic | Diff | Type */
+  gap: 12px;
+}
+@media (max-width: 760px){
+  .qrow{ grid-template-columns: 1fr; }
+}
+.qopt{ display:flex; flex-direction:column; gap:8px; }
+.qopt label{ font-weight:600; font-size:.95rem; }
+.qopt .muted{ color:var(--muted); font-weight:500; }
+
+.qopt input[type="text"]{
+  width:100%; padding:10px 12px; background:var(--panel); color:var(--text);
+  border:1px solid var(--border); border-radius:10px;
+}
+
+.pill-group{ display:flex; gap:10px; flex-wrap:wrap; }
+.pill{
+  display:inline-flex; align-items:center; gap:6px; padding:8px 10px;
+  border:1px solid var(--border); border-radius:999px; background:var(--chip);
+  user-select:none;
+}
+.pill input{ accent-color: var(--brand); }
+
+/* Visually mute disabled groups */
+.qopt.is-disabled{ opacity:.58; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <div class="logo" aria-hidden="true"></div>
+      <div>
+        <h1>Build a Mock Exam Paper</h1>
+        <div class="subtitle">Upload study files, choose question counts, and generate a polished paper + mark scheme.</div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <!-- Left: Files -->
+      <section class="card">
+        <h2 style="margin:0 0 8px">Your files</h2>
+        <div id="drop" class="drop" tabindex="0" role="button" aria-label="Upload files">
+          <strong>Drag &amp; drop</strong> .txt, .pdf, .docx, .pptx, .rtf, .png, .jpg/.jpeg, .tif/.tiff, .webp, .bmp here
+          <p>or</p>
+          <div class="btn-row">
+            <button class="btn" id="chooseBtn" type="button">Choose files</button>
+            <input id="file" type="file" multiple accept=".txt,.pdf,.docx,.pptx,.rtf,.png,.jpg,.jpeg,.tif,.tiff,.webp,.bmp,image/*" style="display:none" />
+          </div>
+          <p class="help" id="limitHelp">Max {{ max_file_mb|int }} MB per file</p>
+        </div>
+
+        <div class="files" id="file-list" aria-live="polite"></div>
+        <hr style="border:none; border-top:1px solid var(--border); margin:16px 0">
+        
+        <div class="field">
+          <label for="manualText">Or, if you prefer, describe some of the exam materials yourself:</label>
+          <textarea id="manualText" rows="6" placeholder="Paste or type your study material here..."></textarea>
+          <div class="help">
+            We'll treat this exactly like an uploaded .txt file.
+            <span id="manualCount" style="float:right">0 characters</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right: Options -->
+      <section class="card">
+        <h2 style="margin:0 0 8px">Options</h2>
+        <div class="field">
+  <label for="title">Title</label>
+  <input type="text" id="title" maxlength="80" placeholder="e.g. Physics Mock Paper" value="" />
+  <div id="titleHelp" class="help">Appears on both PDFs</div>
+  <div id="titleHint" class="help" style="margin-top:6px; display:none; color: var(--err);">
+    Please enter a title.
+  </div>
+</div>
+<div class="field" id="qcountRow" style="margin-top:10px">
+  <label for="qcount">Number of questions</label>
+  <div class="select-wrap">
+    <select id="qcount" class="select"></select>
+  </div>
+  <div id="qcountHint" class="help" style="margin-top:6px; display:none; color: var(--err);">
+    Please select a number of questions.
+  </div>
+</div>
+        <div id="optDifficulty" class="field" style="margin-top:12px">
+  <label for="difficulty">Difficulty level for all questions:</label>
+  <div class="radio-inline" role="radiogroup" aria-label="Difficulty level">
+    <label><input type="radio" name="difficulty" id="diff-easy" value="easy"> Easy <span class="help">(fastest)</span></label>
+    <label><input type="radio" name="difficulty" id="diff-medium" value="medium" checked> Medium <span class="help">(standard)</span></label>
+    <label><input type="radio" name="difficulty" id="diff-hard" value="hard"> Hard <span class="help">(slowest)</span></label>
+  </div>
+  <div class="help">Relative estimates only: Easy ≈ 0.8× time, Medium ≈ 1.0×, Hard ≈ 1.2×.</div>
+  <div class="help">Individual question settings can be tweaked in Advanced.</div>
+</div>
+
+
+        <div class="btn-row" style="justify-content:flex-start; margin-top:16px">
+          <button class="btn primary" id="submitBtn" type="button" disabled>
+            <span id="submitSpinner" class="spinner" style="display:none"></span>
+            Generate PDFs
+          </button>
+          <button class="btn ghost" id="clearBtn" type="button">Clear list</button>
+        </div>
+
+        <div id="response" class="status" role="status" aria-live="polite"></div>
+      </section>
+    </div>
+
+<!-- Advanced -->
+<details id="advancedCard" class="card fade-in" style="display:none; margin-top:16px">
+  <summary class="adv-summary">
+    <span class="adv-title">Advanced</span>
+    <span class="adv-count" id="advCount" aria-live="polite"></span>
+  </summary>
+
+  <div class="adv-body">
+  <!-- NEW: per-question customization toggles -->
+  <div class="adv-controls">
+    <fieldset class="adv-checks">
+      <legend class="sr-only">Per-question customization</legend>
+
+      <label class="chk">
+        <input type="checkbox" id="advTopicChk">
+        Provide additional instructions per question
+      </label>
+
+      <label class="chk">
+        <input type="checkbox" id="advDiffChk">
+        Customize individual question difficulties
+      </label>
+
+      <label class="chk">
+        <input type="checkbox" id="advTypeChk">
+        Customize individual question types
+      </label>
+    </fieldset>
+  </div>
+
+  <div id="advEmpty" class="help">No questions yet. Pick counts in Options.</div>
+  <div id="qGrid" class="qgrid" role="list"></div>
+</div>
+</details>
+<!-- Progress Section -->
+    <div id="progressSection" class="progress-section" tabindex="-1" role="region" aria-label="Generation progress">
+      <div class="progress-header">
+        <h3 style="margin:0; font-size:1.1rem;">Generating your exam paper...</h3>
+        <div class="spinner"></div>
+      </div>
+      
+      <div class="time-estimate">
+        <strong>Estimated time:</strong> <span id="timeEstimate">30-60 seconds</span>
+      </div>
+      
+      <div class="progress-bar-container">
+        <div id="progressBar" class="progress-bar"></div>
+      </div>
+      
+      <div class="progress-steps" id="progressSteps">
+        <div class="progress-step">
+          <div class="step-icon pending" id="step1">1</div>
+          <div class="step-text">Processing and analyzing your files...</div>
+          <div class="step-time" id="time1"></div>
+        </div>
+        <div class="progress-step">
+          <div class="step-icon pending" id="step2">2</div>
+          <div class="step-text">Creating intelligent summaries...</div>
+          <div class="step-time" id="time2"></div>
+        </div>
+        <div class="progress-step">
+          <div class="step-icon pending" id="step3">3</div>
+          <div class="step-text">Generating exam questions...</div>
+          <div class="step-time" id="time3"></div>
+        </div>
+        <div class="progress-step">
+          <div class="step-icon pending" id="step4">4</div>
+          <div class="step-text">Creating marking scheme...</div>
+          <div class="step-time" id="time4"></div>
+        </div>
+        <div class="progress-step">
+          <div class="step-icon pending" id="step5">5</div>
+          <div class="step-text">Compiling PDFs...</div>
+          <div class="step-time" id="time5"></div>
+        </div>
+      </div>
+    </div>
+    <!-- Downloads -->
+<section id="downloadsCard" class="card fade-in" style="display:none; margin-top:16px">
+  <h2 style="margin:0 0 8px">Downloads</h2>
+  <div class="btn-row" style="justify-content:flex-start">
+    <a id="dlQuestions" class="btn" href="#" aria-disabled="true">
+      <span class="mini-spinner" aria-hidden="true"></span>Questions.pdf
+    </a>
+    <a id="dlAnswers" class="btn" href="#" aria-disabled="true">
+      <span class="mini-spinner" aria-hidden="true"></span>Answers.pdf
+    </a>
+  </div>
+  <div class="help">These will activate automatically when ready. You can keep browsing this page.</div>
+</section>
+
+
+    <div class="footer">By uploading, you confirm you have rights to the content. Supported: .txt, .pdf, .docx, .pptx, .rtf,
+     .png, .jpg/.jpeg, .tif/.tiff, .webp, .bmp</div>
+  </div>
+
+  <script>
+    const MAX_FILE_MB = {{ max_file_mb|int }};
+    const validExts = [".txt",".pdf",".docx",".pptx",".rtf",
+                   ".png",".jpg",".jpeg",".tif",".tiff",".webp",".bmp"];
+    const drop = document.getElementById('drop');
+    const downloadsCard = document.getElementById('downloadsCard');
+const dlQuestions = document.getElementById('dlQuestions');
+const dlAnswers = document.getElementById('dlAnswers');
+    const chooseBtn = document.getElementById('chooseBtn');
+    const fileInput = document.getElementById('file');
+    const fileList = document.getElementById('file-list');
+    const submitBtn = document.getElementById('submitBtn');
+    const submitSpinner = document.getElementById('submitSpinner');
+    const clearBtn = document.getElementById('clearBtn');
+    const responseEl = document.getElementById('response');
+    const manualTextEl = document.getElementById('manualText');
+    const manualCountEl = document.getElementById('manualCount');
+    const progressSection = document.getElementById('progressSection');
+const optDifficulty = document.getElementById('optDifficulty');
+const titleHelp     = document.getElementById('titleHelp');
+const advCountEl    = document.getElementById('advCount');
+    const MAX_RETRIES = 0; // Avoid hammering TPM after a 429; user can click again
+    const progressBar = document.getElementById('progressBar');
+    const titleInput = document.getElementById('title');
+const titleHint  = document.getElementById('titleHint');
+    const timeEstimate = document.getElementById('timeEstimate');
+    let qErrorArmed = false; // show question-count error only after a failed submit
+    let titleErrorArmed = false;
+    let qcountErrorArmed = false; // show qcount error only after a failed submit
+    let serverProgress = 0;      // % from backend
+  let statusInterval = null;   // polling timer
+  let currentJob = null;       // job id for this run
+  let genAbort = null;         // AbortController for /upload
+let didCancel = false;       // flag to suppress error UI on cancel
+let clearListDefault = null; // original Clear-list handler we can restore
+  const SOFT_CAP = 85;  
+    let lastProgress = 0; // ensures progress never decreases
+    let visibleProgress = 0;         // what we actually render
+let genStartTs = 0;              // when generation started
+// remember the user's global difficulty to restore later
+let savedGlobalDifficulty = null;
+const INTRO_HOLD_MS = 1800;      // ignore server jumps for the first 1.8s
+const MAX_STEP = 2.2;            // max % the bar may advance per tick
+const CATCHUP = 0.35;   
+function lockUI(){
+  document.body.classList.add('ui-locked');
+
+  // Left column
+  chooseBtn.disabled = true;
+  chooseBtn.setAttribute('aria-disabled','true');
+  fileInput.disabled = true;
+  drop.setAttribute('aria-disabled','true');
+  manualTextEl.disabled = true;
+
+  // Options
+  titleInput.disabled = true;
+  qcountInput.disabled = true;
+  document.querySelectorAll('input[name="difficulty"]').forEach(r => r.disabled = true);
+  optDifficulty?.setAttribute('aria-disabled','true');
+
+  // Advanced: keep the <summary> clickable, but disable all controls inside the panel
+  advancedCard
+    .querySelectorAll(':where(input, textarea, select, button)')
+    .forEach(el => { el.disabled = true; });
+
+  // DO NOT touch the Downloads links; they should remain usable.
+}
+
+function unlockUI(){
+  document.body.classList.remove('ui-locked');
+
+  // Left column
+  chooseBtn.disabled = false;
+  chooseBtn.removeAttribute('aria-disabled');
+  fileInput.disabled = false;
+  drop.removeAttribute('aria-disabled');
+  manualTextEl.disabled = false;
+  clearBtn.disabled = false;
+  clearBtn.removeAttribute('aria-disabled');
+
+  // Options
+  titleInput.disabled = false;
+  qcountInput.disabled = false;
+  document.querySelectorAll('input[name="difficulty"]').forEach(r => r.disabled = false);
+  optDifficulty?.removeAttribute('aria-disabled');
+
+  // Advanced controls back on; re-apply your per-question enable/disable rules
+  advancedCard
+    .querySelectorAll(':where(input, textarea, select, button)')
+    .forEach(el => { el.disabled = false; });
+
+  applyAdvToggles();     // respects advTopicChk/advDiffChk/advTypeChk
+  refreshSubmitState();  // re-evaluate submit availability
+}
+function swapClearToCancel(){
+  // preserve original handler if not already stored
+  if (!clearListDefault) clearListDefault = clearBtn.onclick || clearListDefaultHandler;
+
+  clearBtn.textContent = 'Cancel';
+  clearBtn.classList.remove('ghost');
+  clearBtn.classList.add('danger');
+  clearBtn.removeAttribute('aria-disabled');
+  clearBtn.disabled = false;
+  clearBtn.onclick = cancelGeneration;
+}
+
+function restoreClearAsClear(){
+  clearBtn.textContent = 'Clear list';
+  clearBtn.classList.remove('danger');
+  clearBtn.classList.add('ghost');
+  clearBtn.onclick = (clearListDefault || clearListDefaultHandler);
+  clearBtn.disabled = false;
+  clearBtn.removeAttribute('aria-disabled');
+}
+
+async function cancelGeneration(){
+  // mark intent and stop the request
+  didCancel = true;
+
+  // ask backend to stop current job (best effort)
+  try {
+    if (currentJob) {
+      await fetch('/cancel', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ job: currentJob })
+      });
+    }
+  } catch (_) {}
+
+  // abort the in-flight /upload fetch (front-end)
+  try { if (genAbort) genAbort.abort(); } catch (_) {}
+
+  // stop progress/status UI
+if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
+resetProgress();
+deactivateDownloads('Generation canceled. No files were produced.');
+
+  // UI: restore
+  restoreClearAsClear();
+  submitSpinner.style.display = 'none';
+  unlockUI();
+  setStatus('warn', 'Generation canceled. Your files and settings are preserved.');
+
+  // remove leave protection + restore title (use globals set below)
+  try { if (window._beforeUnloadHandler) window.removeEventListener('beforeunload', window._beforeUnloadHandler); } catch(_) {}
+  if (window._originalTitle) document.title = window._originalTitle;
+  window._beforeUnloadHandler = null;
+  genAbort = null;
+}
+    let files = [];
+    let progressInterval;
+    let startTime;
+const qcountInput = document.getElementById('qcount');
+// --- Advanced widgets model + DnD ---
+const advancedCard = document.getElementById('advancedCard');
+const qGrid        = document.getElementById('qGrid');   // matches your HTML
+qGrid.addEventListener('change', (e) => {
+  const t = e.target;
+  if (!t.matches('input[type="radio"][name^="type_"]')) return;
+
+  const card = t.closest('.qcard');
+  if (!card) return;
+
+  const id = card.dataset.id;
+  const item = advModel.find(x => x.id === id);
+  if (!item) return;
+
+  item.type = t.value;
+
+  const qtypeEl = card.querySelector('.qtype');
+  if (qtypeEl) qtypeEl.textContent = `Type: ${item.type}`;
+
+  card.dataset.type = item.type || '';
+  if (!item.type) card.removeAttribute('data-type');
+  refreshSubmitState();
+});
+
+let advModel = [];
+// Persist any in-flight edits from the DOM into advModel (topic, per-question diff)
+function captureAdvFormState(){
+  qGrid.querySelectorAll('.qcard').forEach(card => {
+    const id = card.dataset.id;
+    const item = advModel.find(x => x.id === id);
+    if (!item) return;
+
+    // topic
+    const t = card.querySelector(`#topic_${id}`);
+    if (t) item.topic = t.value;
+
+    // per-question difficulty
+    const d = card.querySelector(`input[name="diff_${id}"]:checked`);
+    if (d) item.diff = d.value;
+  });
+}
+let dragSrcId = null;
+
+const mkId = () =>
+  (crypto.randomUUID ? crypto.randomUUID() : 'id_' + Math.random().toString(36).slice(2));
+// remove the other two qcountInput.addEventListener('change', ...) lines
+qcountInput.addEventListener('change', () => {
+  syncAdvToQCount();      // only rebuild when the count actually changes
+  refreshSubmitState();   // then (cheap) validation / enablement
+});
+function fillRange(id, min, max){
+  const el = document.getElementById(id);
+  el.innerHTML = '';
+  for (let i = min; i <= max; i++){
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = String(i);
+    el.appendChild(opt);
+  }
+  el.value = String(min);
+}
+
+// Replace old fillRange usage for qcount with this:
+  function populateQCountWithPlaceholder(id, min, max){
+    const el = document.getElementById(id);
+    el.innerHTML = '';
+
+    // Placeholder option
+    const ph = document.createElement('option');
+    ph.value = '';
+    ph.textContent = 'Select';
+    ph.disabled = false;    // keep it clickable so users can open the menu
+    ph.selected = true;     // default selection
+    el.appendChild(ph);
+
+    for (let i = min; i <= max; i++){
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = String(i);
+      el.appendChild(opt);
+    }
+
+    // Ensure the placeholder is the current value
+    el.value = '';
+  }
+
+  // Populate on load
+  populateQCountWithPlaceholder('qcount', 1, 30);
+applyAdvToggles(); // already present, but safe to call here too
+refreshSubmitState();
+// Helper: parse counts safely
+    function utf8Bytes(str){
+      const enc = new TextEncoder();
+      return enc.encode(str);
+    }
+    
+    function manualTextToFile(){
+      const text = document.getElementById('manualText').value.trim();
+      if (!text) return null;
+      const blob = new Blob([text], { type: 'text/plain' });
+      return new File([blob], 'manual_input.txt', { type: 'text/plain' });
+    }
+    
+    function bytesToSize(bytes){
+      const u = ['B','KB','MB','GB']; let i=0, n=bytes;
+      while(n>=1024 && i<u.length-1){ n/=1024; i++; }
+      return n.toFixed(n>=10||i===0?0:1)+' '+u[i];
+    }
+    
+    function allowedExtension(filename){
+      const idx = filename.lastIndexOf(".");
+      if (idx < 0) return false;
+      const ext = filename.substring(idx).toLowerCase();
+      return validExts.includes(ext);
+    }
+    
+    async function calculateFileHash(file){
+      const buf = await file.arrayBuffer();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', buf);
+      const arr = Array.from(new Uint8Array(hashBuffer));
+      return arr.map(b=>b.toString(16).padStart(2,'0')).join('');
+    }
+    
+    function setStatus(type, html){
+      responseEl.className = 'status show ' + type;
+      responseEl.innerHTML = html;
+    }
+    
+    function clearStatus(){
+      responseEl.className = 'status';
+      responseEl.innerHTML = '';
+    }
+function refreshSubmitState(){
+  const hasManual = !!manualTextEl.value.trim();
+  const titleVal  = titleInput.value.trim();
+  const isExam = true;
+  const qcountOK  = getQuestionCount() > 0; // true only when not on placeholder
+
+  // Enable submit when there is at least one input (files or manual).
+  // We do NOT block the button for qcount here so the user can "attempt"
+  // and then we show the red hint.
+  const hasAnyInput = (files.length > 0 || hasManual);
+  // Block submit unless required per-question radios are filled (when toggled on)
+const diffOn = !!document.getElementById('advDiffChk')?.checked;
+const typeOn = !!document.getElementById('advTypeChk')?.checked;
+const totalQs = getQuestionCount();
+
+// Count checked radios in the advanced grid
+const diffsChecked = document.querySelectorAll('.qopt-diff input[type="radio"]:checked').length;
+const typesChecked = document.querySelectorAll('.qopt-type input[type="radio"]:checked').length;
+
+// You must fill the radios for whichever checklist(s) are on
+let perQuestionOK = true;
+if (diffOn) perQuestionOK = perQuestionOK && (diffsChecked === totalQs);
+if (typeOn) perQuestionOK = perQuestionOK && (typesChecked === totalQs);
+
+// Final enable/disable
+submitBtn.disabled = !(hasAnyInput && perQuestionOK);
+
+
+  // Title inline error
+  if (titleErrorArmed && !titleVal) {
+    titleHint.style.display = 'block';
+    titleInput.classList.add('invalid');
+  } else {
+    titleHint.style.display = 'none';
+    titleInput.classList.remove('invalid');
+    if (titleVal) titleErrorArmed = false;
+  }
+
+  // qcount inline hint only AFTER an attempted submit
+  const qcountHint = document.getElementById('qcountHint');
+  const qcountSel  = document.getElementById('qcount');
+  const showQErr   = qcountErrorArmed && isExam && !qcountOK;
+
+  if (qcountHint) qcountHint.style.display = showQErr ? 'block' : 'none';
+  if (qcountSel)  qcountSel.classList.toggle('invalid', showQErr);
+
+  // Keep Advanced widget count in sync with qcount
+}
+    function renderFiles(){
+      fileList.innerHTML = '';
+      files.forEach(({file, hash})=>{
+        const item = document.createElement('div');
+        item.className = 'file';
+        const ext = file.name.split('.').pop()?.toUpperCase() || '';
+        item.innerHTML = `
+          <span class="badge" aria-label="File type">${ext}</span>
+          <div class="file-main">
+            <div class="file-name" title="${file.name}">${file.name}</div>
+            <div class="file-meta">${bytesToSize(file.size)}</div>
+          </div>
+          <button class="file-remove" aria-label="Remove ${file.name}">&times;</button>
+        `;
+         item.querySelector('.file-remove').onclick = ()=>{
+   const idx = files.findIndex(f => f.hash === hash);
+  if (idx > -1) {
+    files.splice(idx, 1);
+    renderFiles();
+    refreshSubmitState();
+}
+        };
+        fileList.appendChild(item);
+      });
+    }
+    
+    async function acceptFileList(list){
+  clearStatus();
+
+  const incoming = Array.isArray(list) ? list : Array.from(list || []);
+  const existingHashes = new Set(files.map(f => f.hash));
+  const batchHashes = new Set();
+
+  for (const f of incoming){
+    if (!allowedExtension(f.name)){
+      setStatus('warn', `Unsupported format for <strong>${f.name}</strong>. Allowed: ${validExts.join(', ')}`);
+      continue;
+    }
+    if (f.size > MAX_FILE_MB*1024*1024){
+      setStatus('warn', `<strong>${f.name}</strong> is larger than ${MAX_FILE_MB} MB.`);
+      continue;
+    }
+
+    const hash = await calculateFileHash(f);
+    if (existingHashes.has(hash) || batchHashes.has(hash)){
+      setStatus('warn', `Duplicate content detected for <strong>${f.name}</strong>. Skipped.`);
+      continue;
+    }
+
+    files.push({ file: f, hash });
+    batchHashes.add(hash);
+  }
+
+  renderFiles();
+  refreshSubmitState();
+}
+
+
+    function estimateProcessingTime() {
+  const isExam = true;
+  const totalFiles = files.length + (manualTextEl.value.trim() ? 1 : 0);
+
+  const numQuestions = getQuestionCount();
+
+  let estimatedSeconds = 15;
+estimatedSeconds += totalFiles * 3;
+estimatedSeconds += numQuestions * 1.5;
+
+  if (estimatedSeconds < 20) return "15-30 seconds";
+  if (estimatedSeconds < 40) return "30-45 seconds";
+  if (estimatedSeconds < 60) return "45-60 seconds";
+  return "60-90 seconds";
+}
+
+    function updateProgressStep(stepNumber, status, timeText = '') {
+      const stepIcon = document.getElementById(`step${stepNumber}`);
+      const stepTime = document.getElementById(`time${stepNumber}`);
+      
+      stepIcon.className = `step-icon ${status}`;
+      if (status === 'complete') {
+        stepIcon.innerHTML = '✓';
+      } else if (status === 'active') {
+        stepIcon.innerHTML = stepNumber;
+      }
+      
+      if (stepTime && timeText) {
+        stepTime.textContent = timeText;
+      }
+    }
+
+    function startProgressSimulation() {
+  startTime = Date.now();
+  progressSection.classList.add('show', 'fade-in');
+    // Auto-scroll to the progress section when generation starts
+  // Wait one frame so the browser lays out the newly-shown section, then scroll.
+  requestAnimationFrame(() => {
+    // a11y: move programmatic focus to the region, without causing a second jump
+    if (!progressSection.hasAttribute('tabindex')) progressSection.setAttribute('tabindex', '-1');
+    progressSection.focus({ preventScroll: true });
+
+    // smooth scroll the section to the top of the viewport
+    progressSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  timeEstimate.textContent = estimateProcessingTime();
+
+  let currentStep = 1;
+  let progress = 0;
+  lastProgress = 0; // reset monotonic tracker each run
+  genStartTs = Date.now();
+visibleProgress = 0;
+
+  const stepTimings = [
+    { step: 1, duration: 8000, progress: 15 },
+    { step: 2, duration: 15000, progress: 35 },
+    { step: 3, duration: 20000, progress: 70 },
+    { step: 4, duration: 8000, progress: 85 },
+    { step: 5, duration: 7000, progress: 100 }
+  ];
+
+  let stepStartTime = Date.now();
+  updateProgressStep(1, 'active');
+
+  progressInterval = setInterval(() => {
+    const stepElapsed = Date.now() - stepStartTime;
+
+    // Handle step transitions
+    const currentStepData = stepTimings[currentStep - 1];
+    if (currentStepData && stepElapsed >= currentStepData.duration) {
+      const stepDuration = ((Date.now() - stepStartTime) / 1000).toFixed(1);
+      updateProgressStep(currentStep, 'complete', `${stepDuration}s`);
+
+      currentStep++;
+      if (currentStep <= stepTimings.length) {
+        stepStartTime = Date.now();
+        updateProgressStep(currentStep, 'active');
+      }
+    }
+
+    // ===== SMOOTHED HYBRID PROGRESS SECTION =====
+
+// 1) Compute simulated target for the current step
+const targetProgress = stepTimings.find(s => s.step === currentStep)?.progress || 0;
+const randomFactor = Math.random() * 5 - 2.5; // ±2.5%
+let sim = targetProgress + randomFactor;
+sim = Math.min(SOFT_CAP, sim); // SOFT_CAP = 85
+
+// 2) For the first INTRO_HOLD_MS, ignore server jumps to avoid the "sudden halfway" effect
+const now = Date.now();
+const inIntro = (now - genStartTs) < INTRO_HOLD_MS;
+
+// Goal is either calm simulation (during intro) or the higher of sim/server (after intro)
+let goal = inIntro ? Math.min(sim, SOFT_CAP) : Math.max(sim, serverProgress);
+
+// Keep the UI below 95% until the server is actually near the end
+if (serverProgress < 96) goal = Math.min(95, goal);
+
+// 3) Rate-limit toward the goal (no big jumps)
+if (goal > visibleProgress) {
+  const gap = goal - visibleProgress;                  // how far we are from where we want to be
+  const step = Math.min(MAX_STEP, Math.max(0.6, gap * CATCHUP)); // close a fraction, but cap per tick
+  visibleProgress += step;
+}
+
+// 4) Monotonic safety and render
+visibleProgress = Math.max(visibleProgress, lastProgress);
+lastProgress = visibleProgress;
+progress = visibleProgress;
+progressBar.style.width = `${progress}%`;
+
+// ===== END SMOOTHED HYBRID PROGRESS SECTION =====
+
+  }, 500);
+}
+
+
+
+    function completeProgress() {
+      if (progressInterval) {
+        clearInterval(progressInterval);
+        progressInterval = null;
+      }
+      if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
+      
+      // Complete all remaining steps
+      for (let i = 1; i <= 5; i++) {
+        updateProgressStep(i, 'complete');
+      }
+      
+      progressBar.style.width = '100%';
+      lastProgress = 100; // <-- add this
+      visibleProgress = 100;
+      
+      // Hide progress section after a brief delay
+      setTimeout(() => {
+        progressSection.classList.remove('show');
+      }, 2000);
+    }
+
+    function resetProgress() {
+      if (progressInterval) {
+        clearInterval(progressInterval);
+        progressInterval = null;
+      }
+      if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
+      
+      progressSection.classList.remove('show');
+progressBar.style.width = '0%';
+lastProgress = 0;
+serverProgress = 0;
+visibleProgress = 0;    // <-- add
+genStartTs = 0;         // <-- add
+
+      
+      // Reset all steps
+      for (let i = 1; i <= 5; i++) {
+        updateProgressStep(i, 'pending');
+        const stepIcon = document.getElementById(`step${i}`);
+        const stepTime = document.getElementById(`time${i}`);
+        stepIcon.innerHTML = i;
+        if (stepTime) stepTime.textContent = '';
+      }
+    }
+    function startStatusPolling(job) {
+  serverProgress = 0;
+  if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
+  statusInterval = setInterval(async () => {
+    try {
+      const r = await fetch(`/status?job=${encodeURIComponent(job)}`, { cache: 'no-store' });
+      if (!r.ok) return;
+      const s = await r.json();
+
+      if (typeof s.pct === 'number') {
+        serverProgress = Math.max(serverProgress, s.pct);
+      }
+      // Optional: reflect step labels in UI (kept simple here)
+      // if (s.label) { /* you could display s.label somewhere */ }
+
+      if (s.status === 'done' || serverProgress >= 100) {
+  // Let the smoothing loop take it to 100; then finalize once we're close
+  serverProgress = 100;
+  if (visibleProgress >= 99) {
+    completeProgress();
+    clearInterval(statusInterval);
+    statusInterval = null;
+  }
+}
+    } catch (e) {
+      // ignore intermittent network errors
+    }
+  }, 1000);
+}
+
+    function showDownloadsPending() {
+  downloadsCard.style.display = 'block';
+
+// reset the default helper text each run
+const help = downloadsCard.querySelector('.help');
+if (help) {
+  help.textContent = 'These will activate automatically when ready. You can keep browsing this page.';
+}
+
+// disable links + ensure each has a spinner
+[dlQuestions, dlAnswers].forEach(a => {
+  a.setAttribute('aria-disabled', 'true');
+  a.removeAttribute('href');
+  a.removeAttribute('target');
+  if (!a.querySelector('.mini-spinner')) {
+    const s = document.createElement('span');
+    s.className = 'mini-spinner';
+    s.setAttribute('aria-hidden', 'true');
+    a.prepend(s);
+  }
+});
+}
+
+function activateDownloads() {
+  // Enable & point directly at your Flask downloads
+  dlQuestions.removeAttribute('aria-disabled');
+  dlQuestions.href = '/download/questions';
+  dlQuestions.target = '_blank';
+
+  dlAnswers.removeAttribute('aria-disabled');
+  dlAnswers.href = '/download/answers';
+  dlAnswers.target = '_blank';
+
+  // Remove the little spinners now that they’re ready
+  const spinners = downloadsCard.querySelectorAll('.mini-spinner');
+  spinners.forEach(s => s.remove());
+}
+
+
+    // Drag & drop
+    ;['dragenter','dragover'].forEach(evt=>{
+      drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.add('dragover'); });
+    });
+    document.getElementById('advTopicChk')?.addEventListener('change', applyAdvToggles);
+document.getElementById('advDiffChk') ?.addEventListener('change', applyAdvToggles);
+document.getElementById('advTypeChk') ?.addEventListener('change', applyAdvToggles);
+
+// Also call once on load in case Advanced is already open:
+applyAdvToggles();
+titleInput.addEventListener('input', refreshSubmitState);
+    ;['dragleave','drop'].forEach(evt=>{
+      drop.addEventListener(evt, e=>{ e.preventDefault(); e.stopPropagation(); drop.classList.remove('dragover'); });
+    });
+    drop.addEventListener('drop', e=>{
+    if (document.body.classList.contains('ui-locked')) return;
+      const dt = e.dataTransfer;
+      if (dt?.files?.length) acceptFileList(dt.files);
+    });
+
+    chooseBtn.onclick = ()=> fileInput.click();
+     fileInput.onchange = async () => {
+  const picked = Array.from(fileInput.files); // snapshot, not live
+  await acceptFileList(picked);               // wait for hashing, etc.
+  fileInput.value = '';                       // now safe to clear
+};
+
+    manualTextEl.addEventListener('input', ()=>{
+      const len = manualTextEl.value.length;
+      manualCountEl.textContent = `${len} character${len===1?'':'s'}`;
+      refreshSubmitState();
+    });
+function deactivateDownloads(reason = '') {
+  // disable links and remove any pending spinners
+  [dlQuestions, dlAnswers].forEach(a => {
+    a.setAttribute('aria-disabled', 'true');
+    a.removeAttribute('href');
+    a.removeAttribute('target');
+  });
+  const spinners = downloadsCard.querySelectorAll('.mini-spinner');
+  spinners.forEach(s => s.remove());
+
+  if (reason) {
+    const help = downloadsCard.querySelector('.help');
+    if (help) help.textContent = reason;
+  }
+}
+function clearListDefaultHandler(){
+  files = []; renderFiles();
+  manualTextEl.value = ''; manualCountEl.textContent = '0 characters';
+  qErrorArmed = false;
+  advModel = []; renderAdvGrid();    // <-- reset Advanced
+  refreshSubmitState(); clearStatus(); resetProgress();
+}
+clearListDefault = clearListDefaultHandler;   // save original
+clearBtn.onclick = clearListDefaultHandler;   // wire it up as default
+
+
+async function runGenerationOnce() {
+  clearStatus();          // no yellow boxes carried over
+  resetProgress();        // reset steps, bar, timers
+
+    // Passed validation — now proceed
+  // --- NEW: auto-open Advanced on generate ---
+    // --- NEW: auto-collapse Advanced on generate ---
+  advancedCard.open = false;
+
+  submitBtn.disabled = true;
+  submitSpinner.style.display = 'inline-block';
+lockUI();
+didCancel = false;         // new run
+swapClearToCancel();       // turn Clear into red Cancel
+  // fresh job id for a truly clean restart
+  currentJob = (crypto.randomUUID && crypto.randomUUID()) || Math.random().toString(36).slice(2);
+
+  // show disabled downloads each attempt for consistent UX
+  showDownloadsPending();
+
+  // leave-protection + title swap per attempt
+  const originalTitle = document.title;
+  const beforeUnloadHandler = (e)=>{ e.preventDefault(); e.returnValue=''; };
+  window.addEventListener('beforeunload', beforeUnloadHandler);
+  document.title = 'Generating… ⏳ ' + (document.getElementById('title').value || 'Mock Exam Paper');
+    window._originalTitle = originalTitle;            // expose for cancel
+window._beforeUnloadHandler = beforeUnloadHandler;
+  // start progress + backend polling
+  startProgressSimulation();
+  startStatusPolling(currentJob);
+
+  try {
+    const fd = new FormData();
+    fd.append('job', currentJob);
+
+    // files already in memory
+    files.forEach(({file})=> fd.append('file[]', file));
+
+    // optional manual text as a .txt file
+    const manualFile = manualTextToFile();
+    if (manualFile){
+      const buf = await manualFile.arrayBuffer();
+      const sha = await crypto.subtle.digest('SHA-256', buf);
+      const arr = Array.from(new Uint8Array(sha));
+      const manualHash = arr.map(b=>b.toString(16).padStart(2,'0')).join('');
+       const currentHashes = new Set(files.map(f => f.hash));
+ if (!currentHashes.has(manualHash)) {
+   fd.append('file[]', manualFile);
+ }
+    }
+
+    fd.append('qcount', qcountInput.value || '1');
+// Keep legacy fields at 0 so backend doesn’t choke (until server supports qcount)
+fd.append('long',  '0');
+fd.append('short', '0');
+fd.append('mcq',   '0');
+fd.append('math',  '0');
+    fd.append('title', document.getElementById('title').value || 'Mock Exam Paper');
+    fd.append('mode', 'exam');
+    let chosenDifficulty = '';
+const perQuestionDiff = document.getElementById('advDiffChk')?.checked;
+
+if (!perQuestionDiff) {
+  chosenDifficulty = (document.querySelector('input[name="difficulty"]:checked') || {}).value || 'medium';
+}
+// If per-question is on, we intentionally send an empty string (no global difficulty)
+fd.append('difficulty', chosenDifficulty);
+// Per-question overrides
+const topicsOn = document.getElementById('advTopicChk')?.checked;
+const diffOn   = document.getElementById('advDiffChk')?.checked;
+const typeOn   = document.getElementById('advTypeChk')?.checked;
+
+if (advModel.length) {
+  if (typeOn) {
+    const types = advModel.map(it => {
+      const sel = document.querySelector(`input[name="type_${it.id}"]:checked`);
+      return sel ? sel.value : '';
+    });
+    fd.append('q_types', JSON.stringify(types));
+  }
+  if (topicsOn) {
+    const topics = advModel.map(it => {
+      const inp = document.getElementById(`topic_${it.id}`);
+      return inp ? inp.value.trim() : '';
+    });
+    fd.append('q_topics', JSON.stringify(topics));
+  }
+  if (diffOn) {
+    const diffs = advModel.map(it => {
+      const sel = document.querySelector(`input[name="diff_${it.id}"]:checked`);
+      return sel ? sel.value : '';
+    });
+    fd.append('q_diffs', JSON.stringify(diffs));
+  }
+}
+
+    genAbort = new AbortController();
+const res = await fetch('/upload', { method:'POST', body: fd, signal: genAbort.signal });
+    const text = await res.text();
+
+    if (!res.ok) {
+      // fail this attempt cleanly so caller can restart from the top
+      throw new Error(text || 'Generation failed');
+    }
+
+    // success path
+    completeProgress();
+    activateDownloads();
+    setStatus('ok', 'Your PDFs are ready. Use the buttons below to download.');
+
+    // cleanup after success
+    files = []; renderFiles();
+    qErrorArmed = false;
+    refreshSubmitState();
+
+    return { ok: true };
+  } catch (e) {
+  // ensure UI is clean for a full restart (progress reset handled by cancelGeneration if used)
+  if (!didCancel) {
+  resetProgress();
+  clearStatus();
+  deactivateDownloads('Generation failed. No files were produced.');
+}
+  if (e && (e.name === 'AbortError' || didCancel)) {
+    return { ok: false, canceled: true };
+  }
+  return { ok: false, error: e?.message || 'Network error.' };
+}
+ finally {
+ restoreClearAsClear();  // always put the Clear button back
+genAbort = null;
+    // per-attempt cleanup
+    if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
+    window.removeEventListener('beforeunload', beforeUnloadHandler);
+    document.title = originalTitle;
+    submitSpinner.style.display = 'none';
+    unlockUI();
+    submitBtn.disabled = (files.length === 0 && !manualTextEl.value.trim());
+  }
+}
+/** Render the Advanced grid from advModel; renumber 1..N every time. */
+function getQuestionCount(){
+  const v = (qcountInput.value || '').trim();
+  if (!v) return 0; // placeholder not chosen
+  const n = parseInt(v, 10);
+  return Number.isNaN(n) ? 0 : Math.max(1, n);
+}
+function syncAdvToQCount(){
+  const N = getQuestionCount();
+
+  // shrink
+  if (advModel.length > N) {
+    advModel = advModel.slice(0, N);
+  }
+  // grow
+  while (advModel.length < N) {
+  advModel.push({ id: mkId(), topic: '', type: '', diff: '' });
+}
+
+  renderAdvGrid();
+}
+function applyAdvToggles(){
+  const topicsOn = document.getElementById('advTopicChk')?.checked;
+  const diffOn   = document.getElementById('advDiffChk')?.checked;
+  const typeOn   = document.getElementById('advTypeChk')?.checked;
+
+  // Topic inputs
+  document.querySelectorAll('.qopt-topic').forEach(box=>{
+    box.classList.toggle('is-disabled', !topicsOn);
+    const inp = box.querySelector('textarea');
+    if (inp) inp.disabled = !topicsOn;
+  });
+
+  // Difficulty radios (per-question)
+  document.querySelectorAll('.qopt-diff').forEach(box=>{
+    box.classList.toggle('is-disabled', !diffOn);
+    box.querySelectorAll('input[type="radio"]').forEach(r=> r.disabled = !diffOn);
+  });
+
+  // Type radios
+  document.querySelectorAll('.qopt-type').forEach(box=>{
+    box.classList.toggle('is-disabled', !typeOn);
+    box.querySelectorAll('input[type="radio"]').forEach(r=> r.disabled = !typeOn);
+  });
+
+  // --- Global difficulty (Options tab) ---
+  const optDiffGroup  = document.getElementById('optDifficulty');
+  const globalRadios  = optDiffGroup ? optDiffGroup.querySelectorAll('input[name="difficulty"]') : [];
+
+  if (diffOn) {
+    // Save current selection ONCE when turning per-question on
+    if (savedGlobalDifficulty === null) {
+      const sel = Array.from(globalRadios).find(r => r.checked);
+      savedGlobalDifficulty = sel ? sel.value : null;
+    }
+    // Visually blank + lock the group while per-question is active
+    globalRadios.forEach(r => { r.checked = false; r.disabled = true; });
+    optDiffGroup?.setAttribute('aria-disabled','true');
+    optDiffGroup?.classList.add('is-disabled');
+  } else {
+    // Re-enable the group
+    globalRadios.forEach(r => { r.disabled = false; });
+    optDiffGroup?.removeAttribute('aria-disabled');
+    optDiffGroup?.classList.remove('is-disabled');
+
+    // ✅ Only restore a value if we previously saved one
+    if (savedGlobalDifficulty !== null) {
+      const target = Array.from(globalRadios).find(r => r.value === savedGlobalDifficulty);
+      if (target) {
+        Array.from(globalRadios).forEach(r => r.checked = false);
+        target.checked = true;
+      }
+      savedGlobalDifficulty = null; // clear stash after restoring
+    }
+    // 🔒 No "default to medium" here; leave user’s choice untouched.
+  }
+  // Re-check submit availability whenever toggles change
+refreshSubmitState();
+}
+function renderAdvGrid() {
+  const isExam = true;
+  const qcount  = getQuestionCount();
+  // Persist current input values before we wipe/rebuild the grid
+  captureAdvFormState();
+
+  // Advanced is only usable in exam mode AND when qcount is chosen
+  if (!isExam || qcount === 0) {
+    advancedCard.classList.add('adv-disabled');
+    advancedCard.style.display = isExam ? 'block' : 'none'; // show disabled header in exam mode
+    advancedCard.removeAttribute('open');                   // can't open
+    const emptyEl = document.getElementById('advEmpty');
+    if (emptyEl) emptyEl.style.display = isExam ? 'block' : 'none';
+    if (advCountEl) advCountEl.textContent = isExam ? 'Select a number' : '';
+    qGrid.innerHTML = '';
+    return;
+  }
+
+  // From here, Advanced is enabled and may open/close
+  advancedCard.classList.remove('adv-disabled');
+  advancedCard.style.display = 'block';
+
+  qGrid.innerHTML = '';
+  const count = advModel.length;
+
+  // show/hide the whole Advanced card
+  const emptyEl = document.getElementById('advEmpty');
+  if (!count) {
+    if (emptyEl) emptyEl.style.display = 'block';
+    if (advCountEl) advCountEl.textContent = '';
+    advancedCard.removeAttribute('open'); // keep it closed by default
+    return;
+  }
+
+  if (emptyEl) emptyEl.style.display = 'none';
+  if (advCountEl) advCountEl.textContent = `${count} question${count === 1 ? '' : 's'}`;
+
+  advModel.forEach((item, idx) => {
+    const el = document.createElement('div');
+    el.className = 'qcard';
+    el.dataset.id = item.id;
+    el.setAttribute('draggable', 'true');
+
+    el.innerHTML = `
+  <div class="qhead">
+    <div class="qleft">
+      <div class="qbadge" aria-label="Question ${idx+1}">${idx+1}</div>
+      <div class="qmeta">
+        <div class="qtitle">Question ${idx+1}</div>
+        <div class="qtype muted">Type: ${item.type || 'N/A'}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="qopts" role="group" aria-label="Options for question ${idx+1}">
+    <div class="qrow">
+      <!-- a) Topic -->
+      <div class="qopt qopt-topic is-disabled">
+        <label for="topic_${item.id}">Additional instructions:</label>
+        <textarea id="topic_${item.id}" placeholder="e.g. Make this a multi-part question about the periodic table" disabled maxlength="200" rows="3"></textarea>
+        
+      </div>
+
+      <!-- b) Difficulty -->
+      <div class="qopt qopt-diff is-disabled">
+        <label>Difficulty</label>
+        <div class="pill-group" role="radiogroup" aria-label="Difficulty">
+          <label class="pill"><input type="radio" name="diff_${item.id}" value="easy"   disabled> Easy</label>
+          <label class="pill"><input type="radio" name="diff_${item.id}" value="medium" disabled> Medium</label>
+          <label class="pill"><input type="radio" name="diff_${item.id}" value="hard"   disabled> Hard</label>
+        </div>
+      </div>
+
+      <!-- c) Type -->
+      <div class="qopt qopt-type is-disabled">
+        <label>Question type</label>
+        <div class="pill-group" role="radiogroup" aria-label="Question type">
+          <label class="pill"><input type="radio" name="type_${item.id}" value="Long"  ${item.type==='Long'  ? 'checked' : ''} disabled> Long</label>
+          <label class="pill"><input type="radio" name="type_${item.id}" value="Short" ${item.type==='Short' ? 'checked' : ''} disabled> Short</label>
+          <label class="pill"><input type="radio" name="type_${item.id}" value="MCQ"   ${item.type==='MCQ'   ? 'checked' : ''} disabled> MCQ</label>
+          <label class="pill"><input type="radio" name="type_${item.id}" value="Math"  ${item.type==='Math'  ? 'checked' : ''} disabled> Math</label>
+        </div>
+      </div>
+    </div>
+  </div>
+`;
+// Restore Topic value and keep it synced to the model
+const topicInput = el.querySelector(`#topic_${item.id}`);
+if (topicInput) {
+  topicInput.value = item.topic || '';
+  topicInput.addEventListener('input', (e) => {
+    const m = advModel.find(x => x.id === item.id);
+    if (m) m.topic = e.target.value;
+  });
+}
+
+// Restore per-question Difficulty and keep it synced
+if (item.diff) {
+  const d = el.querySelector(`input[name="diff_${item.id}"][value="${item.diff}"]`);
+  if (d) d.checked = true;
+}
+el.querySelectorAll(`input[name="diff_${item.id}"]`).forEach(r => {
+  r.addEventListener('change', (e) => {
+    const m = advModel.find(x => x.id === item.id);
+    if (m) m.diff = e.target.value;
+    refreshSubmitState();
+  });
+});
+if (item.type) {
+  el.dataset.type = item.type;     // enables your .qcard[data-type="…"] badge tint
+} else {
+  el.removeAttribute('data-type');
+}
+    el.addEventListener('dragstart', (e) => {
+      dragSrcId = item.id;
+      el.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', dragSrcId);
+    });
+    el.addEventListener('dragend', () => {
+      dragSrcId = null;
+      el.classList.remove('dragging');
+      qGrid.querySelectorAll('.drop-target').forEach(n => n.classList.remove('drop-target'));
+    });
+    el.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+    el.addEventListener('dragenter', () => { if (el.dataset.id !== dragSrcId) el.classList.add('drop-target'); });
+    el.addEventListener('dragleave', () => { el.classList.remove('drop-target'); });
+    el.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const src = e.dataTransfer.getData('text/plain') || dragSrcId;
+const tgt = el.dataset.id;
+if (!src || !tgt || src === tgt) return;
+const i = advModel.findIndex(x => x.id === src);
+const j = advModel.findIndex(x => x.id === tgt);
+if (i < 0 || j < 0) return;
+
+// NEW: persist any typed values before we mutate advModel
+captureAdvFormState();
+
+[advModel[i], advModel[j]] = [advModel[j], advModel[i]];
+renderAdvGrid();
+    });
+
+    qGrid.appendChild(el);
+  });
+
+  // Enable/disable per the three checkboxes
+  applyAdvToggles();
+  refreshSubmitState();
+}
+    async function submitFiles(){
+  clearStatus();
+  resetProgress();
+
+  const isExam = true;
+  const titleVal = titleInput.value.trim();
+  const qcountOK = getQuestionCount() > 0;
+
+  // Validate BEFORE disabling button / showing spinner
+  if (!titleVal) {
+    titleErrorArmed = true;
+    refreshSubmitState();
+    return;
+  }
+
+  if (isExam && !qcountOK) {
+    qcountErrorArmed = true;       // arm the red complaint now
+    refreshSubmitState();          // shows the red hint + invalid border
+    document.getElementById('qcount').focus();
+    return;
+  }
+
+  // Passed validation — now proceed
+  submitBtn.disabled = true;
+  submitSpinner.style.display = 'inline-block';
+// Hard-stop if total questions is 0 (extra safety)
+
+// --- auto-retry wrapper ---
+let attempt = 0;
+let result;
+
+do {
+  attempt++;
+  result = await runGenerationOnce();
+  if (result.ok) break; // success, stop retrying
+} while (attempt <= MAX_RETRIES);
+
+// If still failing after retries, show one final error box (not the inline field hints)
+if (!result.ok) {
+  if (result.canceled) {
+    // user canceled: no error box
+  } else {
+    setStatus(
+      'err',
+      `Sorry, we couldn't complete your generation${
+        MAX_RETRIES ? ` after ${attempt} attempt(s)` : ''
+      }. Please try again later.`
+    );
+  }
+}
+    }
+    
+    submitBtn.onclick = submitFiles;
+
+    // Keyboard activation for drop area
+    drop.addEventListener('keydown', e=>{
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+    });
+    renderAdvGrid();
+refreshSubmitState();
+  </script>
+  <div class="maker-badge" aria-label="Made by Ashton Dowling">Made by Ashton Dowling</div>
+</body>
+</html>

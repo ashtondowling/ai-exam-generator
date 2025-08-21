@@ -1,0 +1,11 @@
+Flask
+gunicorn
+openai
+python-dotenv
+numpy
+pdfplumber
+Pillow
+python-docx
+python-pptx
+striprtf
+PyMuPDF
