@@ -7,6 +7,13 @@ try:
     import pdfplumber
 except Exception:
     pdfplumber = None
+import io  # NEW
+try:  # NEW — optional OCR deps
+    import pytesseract
+    from PIL import Image
+except Exception:
+    pytesseract = None
+    Image = None
 from pptx import Presentation
 from striprtf.striprtf import rtf_to_text
 from openai import OpenAI
@@ -27,6 +34,8 @@ import re
 import shutil, subprocess, tempfile, os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import BoundedSemaphore
+import os
+os.environ["APP_ENABLE_OCR"] = "1"  # Force enable OCR
 _TEX_PAR = int(os.getenv("APP_TEX_PARALLEL", "1"))
 _TEX_SEM = BoundedSemaphore(max(1, _TEX_PAR))
 logging.basicConfig(
@@ -110,6 +119,20 @@ ZIP_UNCOMPRESSED_LIMIT_MB= env_int("APP_ZIP_UNCOMP_MB", 300)
 ZIP_COMPRESSION_RATIO_MAX= env_float("APP_ZIP_RATIO_MAX", 200.0)
 
 MAX_CONTENT_LENGTH       = TOTAL_UPLOAD_MB * 1024 * 1024  # Flask body cap (kept)
+# --- OCR settings ---
+ENABLE_OCR        = os.getenv("APP_ENABLE_OCR", "1").lower() in ("1","true","yes")
+OCR_DPI           = env_int("APP_OCR_DPI", 300)     # render DPI for OCR
+OCR_LANG          = env_str("APP_OCR_LANG", "eng")  # tesseract language(s), e.g. "eng+deu"
+OCR_PAGE_LIMIT    = env_int("APP_OCR_PAGE_LIMIT", PDF_PAGE_LIMIT)
+# DEBUG: Check OCR availability
+print(f"DEBUG: ENABLE_OCR = {ENABLE_OCR}")
+print(f"DEBUG: pytesseract = {pytesseract}")
+print(f"DEBUG: Image = {Image}")
+if pytesseract is not None:
+    try:
+        print(f"DEBUG: tesseract version = {pytesseract.get_tesseract_version()}")
+    except Exception as e:
+        print(f"DEBUG: tesseract error = {e}")
 
 def _detect_tectonic_cmd():
     global _TECTONIC_CMD
@@ -683,7 +706,7 @@ def _wrap_naked_math(tex: str) -> str:
 # =========================
 # Stage 14: allow overriding models via env
 summary_model = env_str("OPENAI_MODEL_SUMMARY", "gpt-4o-mini")
-main_model    = env_str("OPENAI_MODEL_MAIN",    "chatgpt-4o-latest")
+main_model    = env_str("OPENAI_MODEL_MAIN",    "gpt-4o-mini")
 # Dedicated answers model for "question paper" mode (overridable via env)
 
 
@@ -1511,6 +1534,61 @@ def allowed_file(filepath):
     ext = os.path.splitext(filepath)[1].lower()
     return ext in ALLOWED_EXTENSIONS
 
+
+def _ocr_pdf_with_tesseract(filepath: str, max_pages: int) -> str:
+    """
+    Best-effort OCR using PyMuPDF -> PIL -> pytesseract.
+    Only used if ENABLE_OCR and pytesseract/PIL are available.
+    """
+    print(f"DEBUG: _ocr_pdf_with_tesseract called with {filepath}")
+
+    if not ENABLE_OCR:
+        print("DEBUG: OCR disabled via ENABLE_OCR")
+        return ""
+    if pytesseract is None:
+        print("DEBUG: pytesseract is None")
+        return ""
+    if Image is None:
+        print("DEBUG: Image is None")
+        return ""
+
+    try:
+        parts = []
+        doc = fitz.open(filepath)
+        n = min(len(doc), max_pages)
+        print(f"DEBUG: Processing {n} pages for OCR")
+
+        # Render @ OCR_DPI and OCR only pages with no selectable text
+        zoom = OCR_DPI / 72.0
+        mat = fitz.Matrix(zoom, zoom)
+
+        for i in range(n):
+            page = doc.load_page(i)
+            txt = page.get_text("text") or ""
+            if txt.strip():
+                print(f"DEBUG: Page {i + 1} has text, using extracted text")
+                parts.append(txt)
+                continue
+
+            try:
+                print(f"DEBUG: OCRing page {i + 1}")
+                pix = page.get_pixmap(matrix=mat, alpha=False)
+                img = Image.open(io.BytesIO(pix.tobytes("png")))
+                ocr_txt = pytesseract.image_to_string(img, lang=OCR_LANG) or ""
+                print(f"DEBUG: OCR page {i + 1} result length: {len(ocr_txt)}")
+                parts.append(ocr_txt)
+            except Exception as e:
+                print(f"DEBUG: OCR failed on page {i + 1}: {e}")
+                parts.append("")
+
+        result = "\n".join(parts)
+        print(f"DEBUG: OCR function returning {len(result)} characters")
+        return result
+
+    except Exception as e:
+        print(f"DEBUG: OCR function failed: {e}")
+        return ""
+
 def preprocessing(filepath):
     ext = os.path.splitext(filepath)[1].lower()
 
@@ -1528,27 +1606,76 @@ def preprocessing(filepath):
             with open(filepath, "r", encoding="utf-16") as f:
                 return _cap(f.read(), TXT_CHAR_LIMIT)
 
+
     elif ext == ".pdf":
-        # prefer PyMuPDF; cap pages
+        # Prefer PyMuPDF; add OCR fallback for image-only pages
         try:
             parts = []
             doc = fitz.open(filepath)
             n = min(len(doc), PDF_PAGE_LIMIT)
+            zoom = OCR_DPI / 72.0
+            mat = fitz.Matrix(zoom, zoom)
+
             for i in range(n):
-                parts.append(doc.load_page(i).get_text("text") or "")
-            return _cap("\n".join(parts), TXT_CHAR_LIMIT)
-        except Exception:
-            # fallback to pdfplumber if available
+                page = doc.load_page(i)
+                t = page.get_text("text") or ""
+
+                # DEBUG: Log page text extraction
+                print(f"DEBUG: Page {i + 1} extracted text length: {len(t)}")
+
+                if t.strip():
+                    parts.append(t)
+                elif ENABLE_OCR and pytesseract is not None and Image is not None:
+                    # OCR this page
+                    print(f"DEBUG: Attempting OCR on page {i + 1}")
+                    try:
+                        pix = page.get_pixmap(matrix=mat, alpha=False)
+                        img = Image.open(io.BytesIO(pix.tobytes("png")))
+                        t_ocr = pytesseract.image_to_string(img, lang=OCR_LANG) or ""
+                        print(f"DEBUG: OCR result length: {len(t_ocr)}")
+                        parts.append(t_ocr)
+                    except Exception as e:
+                        print(f"DEBUG: OCR failed on page {i + 1}: {e}")
+                        parts.append("")
+                else:
+                    print(f"DEBUG: OCR not available or disabled")
+                    parts.append("")
+
+            result = _cap("\n".join(parts), TXT_CHAR_LIMIT)
+            print(f"DEBUG: Final PDF result length: {len(result)}")
+            return result
+
+        except Exception as e:
+            print(f"DEBUG: PDF processing failed: {e}")
+            # Fallback to pdfplumber (non-OCR)
             if pdfplumber is None:
+                # Last-resort OCR if available
+                if ENABLE_OCR and pytesseract is not None and Image is not None:
+                    print("DEBUG: Using fallback OCR function")
+                    return _cap(_ocr_pdf_with_tesseract(filepath, PDF_PAGE_LIMIT), TXT_CHAR_LIMIT)
                 return ""
+
             out = []
             try:
                 with pdfplumber.open(filepath) as pdf:
                     n = min(len(pdf.pages), PDF_PAGE_LIMIT)
                     for i in range(n):
                         out.append(pdf.pages[i].extract_text() or "")
-                return _cap("\n".join(out), TXT_CHAR_LIMIT)
-            except Exception:
+
+                text = "\n".join(out)
+                print(f"DEBUG: pdfplumber result length: {len(text)}")
+
+                if (not text.strip()) and ENABLE_OCR and pytesseract is not None and Image is not None:
+                    # If still empty, do a final OCR pass
+                    print("DEBUG: pdfplumber empty, trying OCR")
+                    return _cap(_ocr_pdf_with_tesseract(filepath, PDF_PAGE_LIMIT), TXT_CHAR_LIMIT)
+                return _cap(text, TXT_CHAR_LIMIT)
+
+            except Exception as e2:
+                print(f"DEBUG: pdfplumber also failed: {e2}")
+                if ENABLE_OCR and pytesseract is not None and Image is not None:
+                    print("DEBUG: Final OCR attempt")
+                    return _cap(_ocr_pdf_with_tesseract(filepath, PDF_PAGE_LIMIT), TXT_CHAR_LIMIT)
                 return ""
 
     elif ext == ".docx":
@@ -4285,4 +4412,3 @@ if __name__ == "__main__":
     port  = int(os.getenv("APP_PORT", "5000"))
     app = website()  # website() should return `app` (see next change)
     app.run(debug=debug, host=host, port=port, threaded=True)
-
