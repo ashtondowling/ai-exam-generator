@@ -358,3 +358,16 @@ For issues and questions:
 - Verify environment configuration (including OCR setup)
 - Test with the `/smoke/local` endpoint for LaTeX functionality
 - Use debug mode to check OCR processing for problematic PDFs
+
+## 📸 Demo
+
+### Screenshots
+![Upload Interface](screenshots/upload.png)
+![Question Customization](screenshots/advanced.png) 
+![Generated PDF Sample](screenshots/output.png)
+
+### Live Demo
+[Try it here](your-deployed-url) (Note: Requires OpenAI API key)
+
+### Video Walkthrough
+[2-minute demo video](youtube-link)
