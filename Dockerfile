@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates \
     libgraphite2-3 libharfbuzz0b libfontconfig1 libfreetype6 \
     libjpeg62-turbo libpng16-16 libtiff6 libicu72 \
+    tesseract-ocr tesseract-ocr-eng \
  && rm -rf /var/lib/apt/lists/*
 
 # Install Tectonic
@@ -25,4 +26,5 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 CMD sh -lc 'gunicorn -w 1 -k gthread --threads 4 -b 0.0.0.0:$PORT "exam:website()"'
+
 
