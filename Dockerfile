@@ -24,4 +24,5 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD sh -lc 'gunicorn -w 2 -k gthread --threads 4 -b 0.0.0.0:$PORT "exam:website()"'
+CMD sh -lc 'gunicorn -w 1 -k gthread --threads 4 -b 0.0.0.0:$PORT "exam:website()"'
+
