@@ -683,7 +683,7 @@ def _wrap_naked_math(tex: str) -> str:
 # =========================
 # Stage 14: allow overriding models via env
 summary_model = env_str("OPENAI_MODEL_SUMMARY", "gpt-4o-mini")
-main_model    = env_str("OPENAI_MODEL_MAIN",    "gpt-4o-mini")
+main_model    = env_str("OPENAI_MODEL_MAIN",    "chatgpt-4o-latest")
 # Dedicated answers model for "question paper" mode (overridable via env)
 
 
@@ -4285,3 +4285,4 @@ if __name__ == "__main__":
     port  = int(os.getenv("APP_PORT", "5000"))
     app = website()  # website() should return `app` (see next change)
     app.run(debug=debug, host=host, port=port, threaded=True)
+
