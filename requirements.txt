@@ -8,5 +8,3 @@ python-docx>=1.0
 python-pptx>=0.6.21
 striprtf>=0.0.26
 Pillow>=9.5
-
-
