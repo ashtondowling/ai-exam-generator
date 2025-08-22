@@ -142,19 +142,20 @@ pip install werkzeug
 ### 🖼️ Screenshots
 
 **Main Interface - File Upload & Configuration**
-*[Screenshot of the clean, modern upload interface with drag-and-drop area]*
+(screenshots/one.png)
 
 **Advanced Question Customization**
-*[Screenshot of the advanced panel showing per-question controls and drag-and-drop reordering]*
+(screenshots/two.png)
 
 **Real-time Progress Tracking**
-*[Screenshot of the progress bars and step-by-step generation status]*
+(screenshots/three.png)
 
 **Generated Output - Professional PDFs**
-*[Side-by-side screenshots of the question paper and mark scheme PDFs]*
+(screenshots/four.png)
+(screenshots/five.png)
 
 ### 🎯 Live Demo
-*[If you deploy it: Add link to live instance]*
+(https://ai-exam-generator-3e73.onrender.com)
 
 ### Sample Input → Output
 **Input**: *"Upload a chemistry textbook chapter on thermodynamics"*
