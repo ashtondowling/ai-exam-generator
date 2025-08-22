@@ -334,7 +334,6 @@ The application logs to stdout with configurable levels. Key events include:
 ### Sample Output
 - [📄 Sample Question Paper](samples/physics-mock-questions.pdf)
 - [📝 Sample Mark Scheme](samples/physics-mock-answers.pdf)
-- [📊 Generation Statistics](samples/generation-metrics.md)
 
 - ## 📈 Project Metrics
 - **Processing Capacity**: Handles up to 30 files (750MB total) per generation
