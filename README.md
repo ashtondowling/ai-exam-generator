@@ -191,7 +191,7 @@ pip install werkzeug
 | **Screenshots** | A-Level Maths | 3 question math exam + mark scheme | 35s |
 | **Live Demo** | *Try your own materials* | Custom exam paper | 30-60s |
 
-*Demonstrates cross-subject adaptability
+*Demonstrates cross-subject adaptability*
 
 ## Usage
 
