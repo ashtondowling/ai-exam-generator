@@ -201,8 +201,4 @@ The application logs to stdout with configurable levels. Key events include:
 
 ## License
 
-[Add your license information here]
-
-## Contributing
-
-[Add contribution guidelines here]
+Use as you wish, but please provide credit :)
