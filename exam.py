@@ -315,7 +315,7 @@ def patch_left_right(text: str) -> str:
     return t
 
 LATEX_CHAR_MAP = {
-    "×": r"$\times$", "·": r"$\cdot$", "•": r"$\bullet$", "÷": r"$\div$",
+    "⇌": r"$\rightleftharpoons$", "×": r"$\times$", "·": r"$\cdot$", "•": r"$\bullet$", "÷": r"$\div$",
     "±": r"$\pm$", "≠": r"$\ne$", "≈": r"$\approx$", "≡": r"$\equiv$",
     "≤": r"$\le$", "≥": r"$\ge$", "<": "<", ">": ">",
     "∞": r"$\infty$", "∝": r"$\propto$",
@@ -325,6 +325,15 @@ LATEX_CHAR_MAP = {
     "∴": r"$\therefore$", "∵": r"$\because$",
     "∂": r"$\partial$", "∇": r"$\nabla$", "∮": r"$\oint$",
     "→": r"$\to$", "←": r"$\leftarrow$", "⇒": r"$\Rightarrow$", "⇔": r"$\Leftrightarrow$", "↦": r"$\mapsto$",
+    # Chemical arrows - comprehensive list
+    "⇄": r"$\rightleftharpoons$", "⟶": r"$\longrightarrow$", "⟵": r"$\longleftarrow$",
+    "↑": r"$\uparrow$", "↓": r"$\downarrow$", "⇈": r"$\Uparrow$", "⇊": r"$\Downarrow$",
+    "⇀": r"$\rightharpoonup$", "↽": r"$\leftharpoonup$", "⇁": r"$\rightharpoondown$", "↼": r"$\leftharpoondown$",
+    "⇋": r"$\leftrightharpoons$", "↗": r"$\nearrow$", "↘": r"$\searrow$", "↙": r"$\swarrow$", "↖": r"$\nwarrow$",
+    "⟹": r"$\Longrightarrow$", "⟸": r"$\Longleftarrow$", "⟺": r"$\Longleftrightarrow$",
+    "↭": r"$\leftrightsquigarrow$", "⤴": r"$\nearrow$", "⤵": r"$\searrow$",
+    "⥸": r"$\longleftarrow$", "⇉": r"$\rightrightarrows$", "⇇": r"$\leftleftarrows$",
+    "⇈": r"$\upuparrows$", "⇊": r"$\downdownarrows$", "⟼": r"$\mapsto$",
     "°": r"$^\circ$", "′": r"$^\prime$", "″": r"$^{\prime\prime}$",
     "…": r"\ldots",
     "ℝ": r"$\mathbb{R}$", "ℤ": r"$\mathbb{Z}$", "ℕ": r"$\mathbb{N}$",
@@ -386,13 +395,18 @@ def _transform_inside_math(tex: str, fn_disp_and_inl):
         return r'\(' + fn_disp_and_inl(inner) + r'\)'
     tex = re.sub(r'\\\[(.+?)\\\]', repl_disp, tex, flags=re.S)
     tex = re.sub(r'\\\((.+?)\\\)', repl_inl, tex, flags=re.S)
-    return _sanitize_tex_math(tex)
+    return tex  # NOTE: do NOT call _sanitize_tex_math() here
 
 def _transform_inline_math_only(tex: str, fn_inl):
     def repl_inl(m):
         inner = m.group(1)
         return r'\(' + fn_inl(inner) + r'\)'
     return re.sub(r'\\\((.+?)\\\)', repl_inl, tex, flags=re.S)
+def _escape_percent_outside_math(text: str) -> str:
+    r"""Replace literal % with \% outside math, leave math segments untouched."""
+    protected, restore = _protect_math_segments(text)
+    protected = protected.replace('%', r'\%')
+    return restore(protected)
 
 def _wrap_exponents_outside_math(text: str) -> str:
     protected, restore = _protect_math_segments(text)
@@ -483,79 +497,92 @@ def _rate_allow(bucket: str, ip: str, max_count: int) -> bool:
         return True
 
 def get_difficulty_profile(difficulty: str):
-    """Maps difficulty to summarization + question-gen behavior."""
-    d = (difficulty or "medium").lower().strip()
-    if d == "easy":
-        return {
-            "sum_token_scale": 0.80,           # shorter, quicker summaries
-            "sum_temp": 0.05,                  # very stable
-            "sum_words_each": "12-18",
-            "sum_style": (
-                "Prefer high-level, generalized bullets; collapse minor exceptions; "
-                "avoid heavy technical detail; keep bullets concise and non-redundant."
-            ),
-            "q_temp": 0.25,                    # simpler/straighter questions
-        }
-    elif d == "hard":
-        return {
-            "sum_token_scale": 1.25,           # longer, more detailed summaries
-            "sum_temp": 0.15,                  # a touch more variety
-            "sum_words_each": "20-35",
-            "sum_style": (
-                "Prefer specific, technical bullets; include caveats, edge cases, "
-                "quantitative values, assumptions, and parameter ranges where relevant."
-            ),
-            "q_temp": 0.60,                    # harder, more varied questions
-        }
-    # medium (default)
-    return {
-        "sum_token_scale": 1.00,
-        "sum_temp": 0.10,
-        "sum_words_each": "15-25",
-        "sum_style": (
-            "Balance breadth and depth; include definitions, formulas, representative examples, "
-            "and key process steps with essential qualifiers."
-        ),
-        "q_temp": 0.40,
+    d = (difficulty or "medium").strip().lower()
+    if d not in ("easy", "medium", "hard"):
+        d = "medium"
+    profiles = {
+        "easy": {
+            "q_temp": 0.30,
+            "sum_temp": 0.20,
+            "sum_token_scale": 0.90,
+            "sum_words_each": 10,
+            "sum_style": "Short, simple, high-level.",
+        },
+        "medium": {
+            "q_temp": 0.55,
+            "sum_temp": 0.30,
+            "sum_token_scale": 1.00,
+            "sum_words_each": 12,
+            "sum_style": "Concise, balanced detail.",
+        },
+        "hard": {
+            "q_temp": 0.95,      # push non-routine structures
+            "sum_temp": 0.40,
+            "sum_token_scale": 1.15,
+            "sum_words_each": 14,
+            "sum_style": "Technical detail; include assumptions and constraints.",
+        },
     }
+    return profiles[d]
 
 
 # ---- NEW: malformed \frac fixers & backslash sanitizers ----
 def _fix_malformed_frac_text(tex: str) -> str:
+    """Clean rewrite to fix malformed fractions systematically."""
+
     def fix(inner: str) -> str:
-        # \frac{\text{N}{kg}}  -> \frac{\text{N}}{\text{kg}}
+        # STEP 1: Fix the most common problematic pattern first
+        # Pattern: \frac{\text}{X}{\text{Y}} -> \frac{\text{X}}{\text{Y}}
         inner = re.sub(
-            r'\\frac\{\\text\{([^{}]+)\}\{([^{}]+)\}\}',
+            r'\\frac\s*\{\s*\\text\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*\\text\s*\{\s*([^{}]+)\s*\}\s*\}',
             r'\\frac{\\text{\1}}{\\text{\2}}',
-            inner
-        )
-        # \frac{\mathrm{N}{kg}} -> \frac{\mathrm{N}}{\mathrm{kg}}
-        inner = re.sub(
-            r'\\frac\{\\mathrm\{([^{}]+)\}\{([^{}]+)\}\}',
-            r'\\frac{\\mathrm{\1}}{\\mathrm{\2}}',
-            inner
-        )
-        # \frac{N{kg}} -> \frac{N}{kg}
-        inner = re.sub(
-            r'\\frac\{([A-Za-z0-9\\]+)\{([A-Za-z0-9\\]+)\}\}',
-            r'\\frac{\1}{\2}',
-            inner
-        )
-        # \frac{\text{N}}{kg} -> \frac{\text{N}}{\text{kg}}  (units)
-        inner = re.sub(
-            r'\\frac\{\\text\{([^{}]+)\}\}\{([A-Za-z]+)\}',
-            r'\\frac{\\text{\1}}{\\text{\2}}',
-            inner
-        )
-        # \frac{\text{}}{kg} -> \frac{1}{\text{kg}}  (avoid empty numerator causing brace weirdness)
-        inner = re.sub(
-            r'\\frac\{\\text\{\}\}\{([A-Za-z]+)\}',
-            r'\\frac{1}{\\text{\1}}',
             inner
         )
 
-        return inner
+        # STEP 2: Fix pattern with only one \text wrapper
+        # Pattern: \frac{\text}{X}{Y} -> \frac{\text{X}}{\text{Y}}
+        inner = re.sub(
+            r'\\frac\s*\{\s*\\text\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}',
+            r'\\frac{\\text{\1}}{\\text{\2}}',
+            inner
+        )
+
+        # STEP 3: Fix completely malformed fractions with 3+ arguments
+        # Pattern: \frac{A}{B}{C} -> \frac{A}{B} (drop extra arguments)
+        inner = re.sub(
+            r'\\frac\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*[^{}]+\s*\}',
+            r'\\frac{\1}{\2}',
+            inner
+        )
+
+        # STEP 4: Fix fractions with missing braces
+        # Pattern: \frac A B -> \frac{A}{B}
+        inner = re.sub(
+            r'\\frac\s+([^\s{}]+)\s+([^\s{}]+)',
+            r'\\frac{\1}{\2}',
+            inner
+        )
+
+        # STEP 5: Fix empty \text{} commands
+        # Pattern: \frac{\text{}}{\text{X}} -> \frac{1}{\text{X}}
+        inner = re.sub(
+            r'\\frac\s*\{\s*\\text\s*\{\s*\}\s*\}\s*\{\s*([^{}]+)\s*\}',
+            r'\\frac{1}{\1}',
+            inner
+        )
+
+        # STEP 6: Clean up any remaining malformed \text commands
+        # Pattern: \text X -> \text{X}
+        inner = re.sub(
+            r'\\text\s+([A-Za-z]+)',
+            r'\\text{\1}',
+            inner
+        )
+
+        return inner.strip()
+
     return _transform_inside_math(tex, fix)
+
 
 def _sanitize_backslashes(tex: str) -> str:
     # remove \\ inside inline math (illegal), keep display math untouched
@@ -585,28 +612,46 @@ def convert_slashes_only_inside_math(tex: str) -> str:
 def latex_backup_translate(text: str) -> str:
     if not text:
         return text
+
+    # 1) Plain-text normalization + obvious symbol rewrites
     text = normalize_for_latex(text)
     text = _wrap_exponents_outside_math(text)
     text = _context_aware_math(text)
     for k, v in FRACTIONS.items(): text = text.replace(k, v)
-    for k, v in GREEK_MAP.items(): text = text.replace(k, v)
+    for k, v in GREEK_MAP.items():   text = text.replace(k, v)
     for k, v in LATEX_CHAR_MAP.items():
         if v: text = text.replace(k, v)
+
+    # 2) Limits and common math symbol families
     text = _limits_op(text, "∬", r"\\iint")
     text = _limits_op(text, "∭", r"\\iiint")
     text = _limits_op(text, "∮", r"\\oint")
     text = _limits_op(text, "∫", r"\\int")
     text = _limits_op(text, "∑", r"\\sum")
     text = _limits_op(text, "∏", r"\\prod")
+
+    # 3) Basic math cleanups
     text = _replace_sqrt(text)
     text = _replace_super_sub_sequences(text)
     text = re.sub(r"°\s*C", lambda m: r"$^{\circ}$C", text)
     text = re.sub(r'\bdy/dx\b', lambda m: r'$\frac{dy}{dx}$', text)
-    text = re.sub(r'\bd/dx\b', lambda m: r'$\frac{d}{dx}$', text)
-    # NEW safety: fix malformed \frac and sanitize stray \\ now
-    text = _fix_malformed_frac_text(text)
-    text = _sanitize_backslashes(text)
+    text = re.sub(r'\bd/dx\b',  lambda m: r'$\frac{d}{dx}$', text)
+
+    # 4) *** New guards to prevent malformed fractions/units ***
+    text = _fix_text_macros_in_math(text)        # e.g. "\text dm" -> "\text{dm}"; balances \text inside \frac
+    text = _fix_frac_forms_in_math(text)         # e.g. "\frac a b" -> "\frac{a}{b}"
+    text = _fix_sqrt_args_in_math(text)          # e.g. "\sqrt x" -> "\sqrt{x}"
+    text = _fix_frac_sqrt_edgecases_in_math(text)# e.g. "\frac{\sqrt}{A}{B}" -> "\frac{\sqrt{A}}{B}"
+    text = _fix_veclike_args_in_math(text)       # e.g. "\vec x" -> "\vec{x}"
+    text = convert_slashes_only_inside_math(text)# "a/b" -> "\frac{a}{b}" inside math only
+    text = _fix_malformed_frac_text(text)        # <-- includes the specific \frac{\text}{kJ}{\text{mol}} fix
+
+    # 5) Final surface cleanup
+    text = _sanitize_backslashes(text)           # drop stray "\\" outside display math
+    text = _wrap_naked_math(text)                # wrap leftover macro fragments in \( ... \)
+
     return text
+
 
 # ---- NEW: math auto-wrapper for naked macros outside math ----
 _MATH_MACRO_CORE = r'(?:' + '|'.join([
@@ -756,19 +801,19 @@ def t_non_model_seconds(n_files: int, total_raw_tokens: int, total_questions: in
 # Q/A token estimators
 # =========================
 def estimate_tokens_main_questions(n_long: int, n_short: int, n_mcq: int, n_math: int) -> int:
-    BASE, TOK_LONG, TOK_SHORT, TOK_MCQ, TOK_MATH = 20, 180, 80, 120, 160
+    BASE, TOK_LONG, TOK_SHORT, TOK_MCQ, TOK_MATH = 20, 180, 80, 120, 240
     return int(BASE + TOK_LONG * n_long + TOK_SHORT * n_short + TOK_MCQ * n_mcq + TOK_MATH * n_math)
 
 def estimate_tokens_main_answers(n_long: int, n_short: int, n_mcq: int, n_math: int) -> int:
-    BASE, TOK_LONG, TOK_SHORT, TOK_MCQ, TOK_MATH = 15, 150, 50, 20, 130
+    BASE, TOK_LONG, TOK_SHORT, TOK_MCQ, TOK_MATH = 15, 150, 50, 20, 220
     return int(BASE + TOK_LONG * n_long + TOK_SHORT * n_short + TOK_MCQ * n_mcq + TOK_MATH * n_math)
 
 # =========================
 # Summarization planning
 # =========================
-RECOMMENDED_SUMMARY_TOKENS   = env_int("APP_SUMMARY_TOKENS", 350)
-SUMMARY_TOKENS_HARD_MIN      = env_int("APP_SUMMARY_MIN", 200)
-SUMMARY_TOKENS_HARD_MAX      = env_int("APP_SUMMARY_MAX", 800)
+RECOMMENDED_SUMMARY_TOKENS   = env_int("APP_SUMMARY_TOKENS", 700)   # was 350
+SUMMARY_TOKENS_HARD_MIN      = env_int("APP_SUMMARY_MIN", 400)      # was 200
+SUMMARY_TOKENS_HARD_MAX      = env_int("APP_SUMMARY_MAX", 1600)     # was 800
 
 ALWAYS_SAFE_MAIN_Q_INPUT_CAP = env_int("APP_Q_INPUT_CAP", 12_000)
 TARGET_MAX_N_OUT_Q           = env_int("APP_Q_OUT_CAP",   4_000)
@@ -784,19 +829,42 @@ def estimate_compile_seconds() -> float:
     # Empirical, conservative for two Tectonic runs in parallel
     return 5.0
 
+
 def _emergency_tex_sanitize(tex: str) -> str:
-    # \frac{\sqrt}{A}{B} -> \frac{\sqrt{A}}{B}
+    """Emergency fixes for the most common LaTeX compilation failures."""
+
+    # EMERGENCY FIX 1: Most common malformed fraction pattern
+    tex = re.sub(
+        r'\\frac\s*\{\s*\\text\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*\\text\s*\{\s*([^{}]+)\s*\}\s*\}',
+        r'\\frac{\\text{\1}}{\\text{\2}}',
+        tex
+    )
+
+    # EMERGENCY FIX 2: Three-argument fractions (drop the third)
+    tex = re.sub(
+        r'\\frac\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*[^{}]+\s*\}',
+        r'\\frac{\1}{\2}',
+        tex
+    )
+
+    # EMERGENCY FIX 3: \frac{\sqrt}{A}{B} -> \frac{\sqrt{A}}{B}
     tex = re.sub(
         r'\\frac\s*\{\s*\\sqrt\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}',
-        r'\\frac{\\sqrt{\1}}{\2}', tex
+        r'\\frac{\\sqrt{\1}}{\2}',
+        tex
     )
-    # \frac{\sqrt}{A} -> \sqrt{A}
+
+    # EMERGENCY FIX 4: \frac{\sqrt}{A} -> \sqrt{A}
     tex = re.sub(
         r'\\frac\s*\{\s*\\sqrt\s*\}\s*\{\s*([^{}]+)\s*\}',
-        r'\\sqrt{\1}', tex
+        r'\\sqrt{\1}',
+        tex
     )
-    # \sqrt x -> \sqrt{x} (inside doc in case any slipped through)
+
+    # EMERGENCY FIX 5: Bare \sqrt without braces -> \sqrt{}
     tex = re.sub(r'\\sqrt\s+([A-Za-z0-9+\-*/().])', r'\\sqrt{\1}', tex)
+    tex = re.sub(r'\\sqrt(?!\s*\{)', r'\\sqrt{}', tex)
+
     return _sanitize_tex_math(tex)
 
 def plan_summarization_sla(
@@ -814,7 +882,7 @@ def plan_summarization_sla(
     T_QA_pred = t_4o_latest_seconds(n_in_tokens=n_out_q_cap, n_out_tokens=n_out_a_cap)
     T_compile = estimate_compile_seconds()
 
-    T_rem_for_sum = max(4.0, min(25.0, TARGET_MID - T_nonmodel - T_QA_pred - T_compile))
+    T_rem_for_sum = max(4.0, min(35.0, TARGET_MID - T_nonmodel - T_QA_pred - T_compile))  # was min(25.0, ...)
 
     K_parallel = choose_summary_parallelism(
         n_files, raw_avg_tokens, RECOMMENDED_SUMMARY_TOKENS,
@@ -861,32 +929,35 @@ def choose_summary_parallelism(n_files, raw_avg_tokens_per_file, S_summary_token
 
 def enhance_math_content_for_questions(text_for_main: str, num_math: int, total_questions: int) -> str:
     """
-    Enhance the input material to better support math question generation
-    by emphasizing computational and procedural content over explanatory text.
+    Lightly bias the input material toward computational/procedural content when Math items are requested.
+    Neutral to any curriculum/exam board.
     """
-    if num_math == 0:
+    if num_math <= 0 or total_questions <= 0:
         return text_for_main
 
-    math_ratio = num_math / total_questions if total_questions > 0 else 0
+    math_ratio = num_math / total_questions
 
-    # If this is primarily a math exam, add a brief instruction to focus on computational aspects
+    prefix = (
+        "Match step counts by difficulty: easy 1–2, medium 3-4, hard 4–6 with linked subparts. "
+        "Prefer exact forms when sensible; avoid trivial plug-in.\n\n"
+    )
+
     if math_ratio > 0.5:
-        math_focus_instruction = """
-Note: This exam focuses primarily on mathematical calculations and problem-solving. 
-Emphasize: formulas, procedures, computational techniques, numerical methods, and direct problem-solving over lengthy theoretical explanations.
-Extract mathematical problems, worked examples, formulas, and calculation methods.
-
-"""
-        return math_focus_instruction + text_for_main
+        note = (
+            "Note: This paper focuses primarily on mathematical calculations and problem-solving. "
+            "Emphasize formulas, procedures, computational techniques, and direct problem-solving. "
+            "Extract mathematical problems, worked examples, formulas, and calculation methods.\n\n"
+        )
+        return prefix + note + text_for_main
     elif math_ratio > 0.3:
-        math_focus_instruction = """
-Note: Include mathematical calculations and problem-solving questions.
-Focus on: formulas, procedures, and computational techniques alongside conceptual understanding.
+        note = (
+            "Note: Include mathematical calculations and problem-solving questions. "
+            "Focus on formulas, procedures, and computational techniques alongside conceptual understanding.\n\n"
+        )
+        return prefix + note + text_for_main
 
-"""
-        return math_focus_instruction + text_for_main
+    return prefix + text_for_main
 
-    return text_for_main
 
 def _fix_sqrt_args_in_math(tex: str) -> str:
     """Ensure \\sqrt has a braced argument inside math."""
@@ -1152,31 +1223,201 @@ def _bp_counts(blueprint: list[dict]) -> dict:
     return counts_from_blueprint(blueprint)
 
 def _difficulty_profile_for_prompt(global_diff: str | None):
-    # reuse same difficulty buckets as your earlier helper
     d = (global_diff or "medium").strip().lower()
     if d not in ("easy", "medium", "hard"):
         d = "medium"
 
-    LONG_RANGE  = {"easy": "40-80",  "medium": "50-100", "hard": "70-120"}
-    SHORT_RANGE = {"easy": "8-15",   "medium": "10-20",  "hard": "12-25"}
+    LONG_RANGE = {"easy": "30-50", "medium": "60-100", "hard": "80-140"}
+    SHORT_RANGE = {"easy": "6-10", "medium": "10-18", "hard": "14-24"}
 
     diff_line_map = {
-        "easy":   "Ensure questions are accessible and cover core topics; prioritize clarity over trickiness",
-        "medium": "Ensure questions are appropriately challenging and span different topics",
-        "hard":   "Ensure questions are quite difficult but also doable, and span different topics",
+        "easy":   "Ensure questions are accessible and cover core topics; prioritize clarity over trickiness.",
+        "medium": "Ensure questions require multi-step problem solving, conceptual understanding, and application of principles in unfamiliar contexts.",
+        "hard":   "Ensure questions are non-routine, multi-step, and integrate ideas; still solvable with standard methods for the intended level.",
     }
     diff_guidance_map = {
-        "easy": """- Prefer slightly shorter stems; emphasize definitions and core principles
-- Reduce multi-step reasoning; avoid contrived scenarios
-- Keep calculations and MCQ distractors straightforward""",
-        "medium": """- Balance concise conceptual questions with light real-world context
-- Include some multi-step reasoning without excessive length
-- MCQ distractors should be plausible and conceptually distinct""",
-        "hard": """- Prefer longer, scenario-based items with multi-step reasoning
-- Emphasize applications, assumptions, caveats, and edge cases
-- MCQ distractors should include subtle common misconceptions""",
+        "easy": (
+            "- Single-idea prompts; no contrived contexts\n"
+            "- Avoid multi-step algebraic traps; keep MCQ distractors simple\n"
+            "- Prefer Short/MCQ/Math; avoid Long unless explicitly requested in Advanced.\n"
+            + _math_difficulty_rubric("easy")
+        ),
+        "medium": (
+    "- Require 3-4 step problem solving with conceptual links between ideas\n"
+    "- Include unfamiliar scenarios requiring application of learned principles\n"
+    "- For MCQ: use sophisticated distractors based on common error patterns and partial understanding\n"
+    "- Demand explanation, analysis, or evaluation rather than simple recall\n"
+    + _math_difficulty_rubric("medium")
+),
+        "hard": (
+    "- Prefer scenario-based or proof/‘show that’ items with dependencies between parts\n"
+    "- Do NOT use MCQ for hard items **unless** explicitly requested (Type=MCQ + Difficulty=hard in Advanced); otherwise use Long, Short or Math with multi-step reasoning\n"
+    + _math_difficulty_rubric("hard")
+),
     }
     return d, LONG_RANGE[d], SHORT_RANGE[d], diff_line_map[d], diff_guidance_map[d]
+
+def _math_difficulty_rubric(level: str) -> str:
+    lvl = (level or "medium").strip().lower()
+    if lvl == "easy":
+        return (
+            "- Math (easy): 1 step; direct use of a single formula; friendly numbers; "
+            "no multi-topic linkage; answer may be simple exact or a short decimal.\n"
+        )
+    if lvl == "hard":
+        return (
+            "- Math (hard): 5–6 linked steps with subparts (a)(b)(c) that build; "
+            "combine at least two areas"
+            "Include at least one of: ‘show that …’, ‘hence …’, or a parameter condition"
+            "Prefer exact forms when sensible; avoid plug-and-chug.\n"
+        )
+    return (
+        "- Math (medium): 4-5 steps requiring method selection and chain reasoning;"
+        "combine two related techniques into the same question;"
+        "include one 'explain why' or 'show that' component;"
+        "use non-obvious numbers requiring careful manipulation.\n"
+    )
+
+# Triviality patterns across domains
+_GENERIC_EASY_PATTERNS = [
+    r"\bdefine\b",
+    r"\blist\b",
+    r"\bstate\b",
+    r"\btrue\/false\b",
+    r"\bplug[- ]?in\b",
+    r"\bsubstitute\b\s+(?:numbers|values)",
+]
+# Math-specific trivialities we want to avoid at 'hard'
+_MATH_TOO_EASY = [
+    r"\bintegrat(e|ion)\b\s+(?:a\s+)?polynomial\b",
+    r"\bdifferentiat(e|ion)\b\s+(?:a\s+)?single (?:term|monomial)\b",
+    r"\bsolve\b\s+(?:a\s+)?linear\b",
+    r"\bsolve\b\s+(?:a\s+)?quadratic\b(?!.*(discriminant|parameter|hence|show that))",
+]
+
+def _looks_trivial(item: str, qtype: str) -> bool:
+    t = (qtype or "").lower()
+    text = (item or "").lower()
+    # Hard items should usually have subparts; absence is a red flag
+    if re.search(r"\b\((?:a|b)\)", text) is None and re.search(r"\b(?:a\)|b\))", text) is None:
+        # keep scanning; we only use this as a soft signal combined with the patterns
+        soft_no_parts = True
+    else:
+        soft_no_parts = False
+
+    for pat in _GENERIC_EASY_PATTERNS:
+        if re.search(pat, text):
+            return True
+
+    if t == "math":
+        for pat in _MATH_TOO_EASY:
+            if re.search(pat, text):
+                return True
+        if "integrate" in text and not any(x in text for x in ["by parts", "substitution", "partial fraction", "limits", "parametric", "implicit"]):
+            return True
+
+    # If super short and no parts, likely trivial
+    few_tokens = len(re.findall(r"\w+", text)) < 25
+    return soft_no_parts and few_tokens
+
+def _rewrite_hard_item(item: str, qtype: str, model: str, max_tokens: int) -> str:
+    # Generic, neutral hardening prompt
+    instr = (
+        "Rewrite the single exam item below into a HARD question suitable for advanced secondary/intro tertiary level. "
+        "Do NOT prepend any item number. Output ONE rewritten item only.\n\n"
+        "Must-have constraints:\n"
+        "- Multi-part with (a), (b), (c) (optionally (d)); later parts depend on earlier results.\n"
+        "- Demand reasoning/derivation/justification\n"
+        "- Integrate at least two ideas or techniques relevant to the subject domain.\n"
+        "- Avoid mere definition/recall/list tasks and plug-and-chug calculations.\n"
+        "- Keep style neutral to any curriculum or exam board; do not include answers.\n"
+    )
+    if (qtype or "").lower() == "math":
+        instr += (
+            "- For Math: prefer exact forms when sensible; include non-trivial constants where appropriate; "
+            "use legitimate methods rather than routine one-step tasks.\n"
+        )
+    return get_response(instr, item, model=model, max_tokens=min(800, int(max_tokens*0.35)), temperature=0.9)
+
+def enforce_hard_items(q_items: list[str], blueprint: list[dict], global_diff: str | None,
+                       model: str, n_out_q_cap: int, max_regens: int = 2) -> list[str]:
+    """Rewrite up to 'max_regens' items that are Hard but look trivial (any type)."""
+    out = list(q_items)
+    idxs = list(range(len(out)))
+    flagged = []
+    d = (global_diff or "medium").strip().lower()
+    for i, bp in zip(idxs, blueprint):
+        qtype = (bp.get("type") or "").lower()
+        local_diff = (bp.get("difficulty") or d or "medium").lower()
+        if local_diff == "hard" and _looks_trivial(out[i], qtype):
+            flagged.append(i)
+    for i in flagged[:max_regens]:
+        try:
+            qtype = (blueprint[i].get("type") or "").lower()
+            out[i] = _rewrite_hard_item(out[i], qtype, model=model, max_tokens=n_out_q_cap)
+        except Exception:
+            pass
+    return out
+
+_HARD_EASY_PATTERNS = [
+    r"\bintegrat(e|ion)\b\s+(?:a\s+)?polynomial\b",
+    r"\bdifferentiat(e|ion)\b\s+(?:a\s+)?single (?:term|monomial)\b",
+    r"\bsolve\b\s+(?:a\s+)?linear\b",
+    r"\bsolve\b\s+(?:a\s+)?quadratic\b(?!.*(discriminant|parameter|hence|show that))",
+    r"\bplug[- ]?in\b",
+    r"\bsubstitute (?:numbers|values)\b\s*(?:to get|and get)\b",
+]
+
+def _is_trivially_easy_math(item: str) -> bool:
+    text = item.lower()
+    if re.search(r"\b(a\)|\(a\))", text) is None and re.search(r"\b(b\)|\(b\))", text) is None:
+        # hard items must be multi-part; absence of (a)(b) is a red flag
+        return True
+    for pat in _HARD_EASY_PATTERNS:
+        if re.search(pat, text):
+            return True
+    # also flag if there's calculus with no sign of methods beyond trivial
+    if "integrate" in text and not any(x in text for x in ["by parts", "substitution", "partial fraction", "limits", "parametric", "implicit"]):
+        return True
+    return False
+
+def _needs_upgrade(item: str, bp_item: dict, global_diff: str | None) -> bool:
+    t = (bp_item.get("type") or "").lower()
+    d = (bp_item.get("difficulty") or global_diff or "medium").lower()
+    return t == "math" and d == "hard" and _is_trivially_easy_math(item)
+
+def _rewrite_hard_math(item: str, model: str, max_tokens: int) -> str:
+    instr = (
+        "Rewrite the single exam item below into a HARD math question suitable for advanced secondary/intro tertiary level.\n"
+        "Do NOT prepend any item number. Output ONE rewritten item only.\n\n"
+        "Constraints (MUST ALL HOLD):\n"
+        "- Multi-part with (a), (b), (c) (and optionally (d)); parts must depend on earlier results.\n"
+        "- Combine AT LEAST TWO topics"
+        "or appropriate Mechanics/Statistics if supported by the material).\n"
+        "- Include ‘show that …’ or ‘hence …’ or ‘find the set of k such that …’\n"
+        "- Use non-trivial constants (surds/π/e/awkward rationals) and require exact forms where sensible.\n"
+        "- DO NOT produce a mere single-step task (no plain polynomial integration, no sole linear solve, etc.).\n"
+        "- Style exactly like Edexcel A-level questions; no answers.\n\n"
+        "Rewrite now:\n"
+    )
+    return get_response(instr, item, model=model, max_tokens=min(800, int(max_tokens*0.35)), temperature=0.9)
+
+def enforce_hard_math(q_items: list[str], blueprint: list[dict], global_diff: str | None,
+                      model: str, n_out_q_cap: int, max_regens: int = 2) -> list[str]:
+    """Scan items; for hard Math that look trivial, rewrite up to max_regens of them."""
+    out = list(q_items)
+    idxs = list(range(len(out)))
+    flagged = []
+    for i, bp in zip(idxs, blueprint):
+        if _needs_upgrade(out[i], bp, global_diff):
+            flagged.append(i)
+    # limit rewrites so we stay within time budget
+    for i in flagged[:max_regens]:
+        try:
+            out[i] = _rewrite_hard_math(out[i], model=model, max_tokens=n_out_q_cap)
+        except Exception:
+            pass
+    return out
 
 def _per_item_spec_lines(blueprint: list[dict], start_idx: int = 1, end_idx: int | None = None) -> str:
     """
@@ -1211,20 +1452,25 @@ def get_quality_question_instruction_from_blueprint(
     math_heavy = counts["Math"] / max(1, N) > 0.5
 
     # quality requirements (mirrors your original but itemized)
+    # quality requirements (math gets an explicit rubric)
     if math_heavy:
-        quality_requirements = """Quality Requirements:
-- Questions should test mathematical understanding and problem-solving skills
-- Focus on: calculations, proofs, algebraic manipulation, geometry, and reasoning
-- Long-answer may require working; short-answer should be direct numerical/short responses
-- MCQ options should include common calculation errors as distractors
-- Use inline math \\( ... \\); avoid display math and do not insert manual line breaks `\\\\`"""
+        quality_requirements = (
+                "Quality Requirements:\n"
+                "- Questions must test understanding and problem-solving, not rote substitution.\n"
+                "- Long-answer may require full working; short-answer should be direct numeric/short responses.\n"
+                "- MCQ options must include common calculation/logic errors as distractors.\n"
+                "- Use inline math \\( ... \\); avoid display math and do NOT insert manual line breaks `\\\\`.\n"
+                + _math_difficulty_rubric(d)
+        )
     else:
-        quality_requirements = """Quality Requirements:
-- Questions must test deep understanding, not just recall
-- Long-answer should require analysis/evaluation/synthesis
-- Short-answer should test key concepts precisely
-- MCQ distractors should be plausible and target misconceptions
-- Use inline math \\( ... \\); avoid display math and do not insert manual line breaks `\\\\`"""
+        quality_requirements = (
+            "Quality Requirements:\n"
+            "- Questions must test deep understanding, not just recall.\n"
+            "- Long-answer should require analysis/evaluation/synthesis.\n"
+            "- Short-answer should test key concepts precisely.\n"
+            "- MCQ distractors should be plausible and target misconceptions.\n"
+            "- If math appears in any item, use inline math \\( ... \\) and avoid manual `\\\\` line breaks.\n"
+        )
 
     global_diff_line = (
         f"Global difficulty: {d} (apply unless a specific item below sets its own Difficulty)."
@@ -1233,10 +1479,12 @@ def get_quality_question_instruction_from_blueprint(
     )
 
     structure_req = f"""Structure Requirements:
-- Produce exactly {N} items, numbered '1.' through '{N}.'
-- For MCQ items, use the format: 'N. Question... A) option B) option C) option D) option'
-- For Long items, target {LONG_RANGE} words; for Short items, target {SHORT_RANGE} words
-- Follow the per-item plan below (order and type are mandatory):"""
+        - Produce exactly {N} items, numbered '1.' through '{N}.'
+        - For MCQ items, use the format: 'N. Question... A) option B) option C) option D) option'
+        - For Long items, target {LONG_RANGE} words; for Short items, target {SHORT_RANGE} words
+        - For Math items: Easy = 1 step; Medium = 4–5 steps; Hard = 5–6 steps with linked subparts (a), (b), (c)
+        - Hard-difficulty items must NOT be MCQ **unless** the per-item plan explicitly sets 'Type: MCQ' with 'Difficulty: hard' (explicit override); otherwise convert to Short or Math
+        - Follow the per-item plan below (order and type are mandatory):"""
 
     per_item_plan = _per_item_spec_lines(blueprint)
 
@@ -1312,34 +1560,114 @@ def _norm_diff(v: str) -> str | None:
         return None
     key = str(v).strip().lower()
     return key if key in DIFF_ALLOWED else None
+def enforce_no_hard_mcq(blueprint: list[dict], global_diff: str | None) -> list[dict]:
+    """
+    Default: block hard MCQ by converting to Short.
+    Exception: allow ONLY if the user explicitly set BOTH Type=MCQ and Difficulty=hard
+    on that item in Advanced overrides.
+    """
+    d_global = (global_diff or "medium").strip().lower()
+    for it in blueprint:
+        t = (it.get("type") or "").strip()
+        d_local = (it.get("difficulty") or d_global or "medium").strip().lower()
+
+        # Was the type/difficulty explicitly set by the user?
+        explicit_type = bool(it.get("_explicit_type"))
+        explicit_diff = bool(it.get("_explicit_diff"))
+
+        hard_mcq_explicit = (t == "MCQ" and d_local == "hard" and explicit_type and explicit_diff)
+
+        if t == "MCQ" and d_local == "hard" and not hard_mcq_explicit:
+            it["type"] = "Short"  # auto-demote
+            it.setdefault("_notes", []).append("auto-demoted-from-hard-MCQ")
+    return blueprint
+def apply_easy_bias(blueprint: list[dict], global_diff: str | None) -> list[dict]:
+    """
+    For effective 'easy' items: avoid Long unless the user explicitly set BOTH
+    Type=Long and Difficulty=easy for that item. Convert auto-Longs to Short/MCQ/Math
+    in a round-robin pattern for variety.
+    """
+    from collections import deque
+    d_global = (global_diff or "medium").strip().lower()
+    rotate_to = deque(["Short", "MCQ", "Math"])
+    for it in blueprint:
+        t = (it.get("type") or "Long").strip()
+        d_local = (it.get("difficulty") or d_global or "medium").strip().lower()
+        explicit_type = bool(it.get("_explicit_type"))
+        explicit_diff = bool(it.get("_explicit_diff"))
+
+        wants_easy_long = (t == "Long" and d_local == "easy" and explicit_type and explicit_diff)
+        if d_local == "easy" and t == "Long" and not wants_easy_long:
+            it["type"] = rotate_to[0]
+            rotate_to.rotate(-1)
+            it.setdefault("_notes", []).append("easy-bias-demote-long")
+    return blueprint
 
 def _sanitize_tex_math(src: str) -> str:
     r"""
-    Normalize mixed \( … \) and $ … $ math, remove stray $ inside \( … \),
-    and fix \frac a b -> \frac{a}{b}.
+    Minimal, ordered fixes only. One pass. No fancy rules.
+    - Strip stray $ inside \( ... \)
+    - Convert $...$ -> \( ... \)
+    - Then, INSIDE MATH ONLY, run a few surgical regexes in this exact order.
     """
-    # 1) Remove any $ inside \( … \)
-    def _strip_dollars_inside(match: re.Match) -> str:
-        inner = match.group(1)
-        inner = inner.replace('$', '')
+
+    # 1) Remove any $ inside existing \( ... \)
+    def _strip_dollars_inside(m: re.Match) -> str:
+        inner = m.group(1).replace('$', '')
         return r"\(" + inner + r"\)"
     src = re.sub(r"\\\((.*?)\\\)", _strip_dollars_inside, src, flags=re.DOTALL)
 
-    # 2) Convert remaining $…$ to \( … \)
-    src = re.sub(r"\$(.+?)\$", lambda m: r"\(" + m.group(1) + r"\)", src, flags=re.DOTALL)
+    # 2) Convert bare $...$ to \( ... \)
+    src = re.sub(r"\$(.+?)\$", r"\\(\1\\)", src, flags=re.DOTALL)
 
-    # 3) Fix common \frac forms missing braces
-    #    \frac a b  -> \frac{a}{b}
-    src = re.sub(r"\\frac\s+([^\s\{\}]+)\s+([^\s\{\}]+)", r"\\frac{\1}{\2}", src)
-    #    \frac{a} b -> \frac{a}{b}
-    src = re.sub(r"\\frac\{([^{}]+)\}\s+([^\s\{\}]+)", r"\\frac{\1}{\2}", src)
-    #    \frac a {b} -> \frac{a}{b}
-    src = re.sub(r"\\frac\s+([^\s\{\}]+)\s+\{([^{}]+)\}", r"\\frac{\1}{\2}", src)
+    # 3) Inside-math fixes (strict order!)
+    def _fix(inner: str) -> str:
+        s = inner
 
-    # 4) Drop any remaining solitary $ (unbalanced)
-    src = src.replace('$', '')
+        # 3.1) \text token(s) -> \text{token(s)}    (1–2 words)
+        s = re.sub(r'\\text\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)', r'\\text{\1}', s)
 
+        # 3.2) SPECIFIC BUG: \frac{\text{X}{Y}} -> \frac{\text{X}}{\text{Y}}
+        s = re.sub(
+            r'\\frac\s*\{\s*\\text\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}\s*\}',
+            r'\\frac{\\text{\1}}{\\text{\2}}',
+            s
+        )
+
+        # 3.3) \frac{\sqrt}{A}{B} -> \frac{\sqrt{A}}{B}
+        s = re.sub(
+            r'\\frac\s*\{\s*\\sqrt\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}',
+            r'\\frac{\\sqrt{\1}}{\2}',
+            s
+        )
+        # 3.4) \frac{\sqrt}{A} -> \sqrt{A}
+        s = re.sub(
+            r'\\frac\s*\{\s*\\sqrt\s*\}\s*\{\s*([^{}]+)\s*\}',
+            r'\\sqrt{\1}',
+            s
+        )
+
+        # 3.5) \sqrt A -> \sqrt{A}
+        s = re.sub(r'\\sqrt\s+([^\s{}]+)', r'\\sqrt{\1}', s)
+
+        # 3.6) \frac A B -> \frac{A}{B}
+        s = re.sub(r'\\frac\s+([^\s{}]+)\s+([^\s{}]+)', r'\\frac{\1}{\2}', s)
+
+        # 3.7) \frac{A}{B}{C} -> \frac{A}{B}  (drop 3rd)
+        s = re.sub(
+            r'\\frac\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*[^{}]+\s*\}',
+            r'\\frac{\1}{\2}',
+            s
+        )
+
+        # 3.8) Remove \\ inside inline math
+        s = re.sub(r'\\\\+', ' ', s)
+
+        return s
+
+    src = _transform_inside_math(src, _fix)
     return src
+
 # --- END: TeX math sanitizer ---
 
 def _parse_seq_field(raw: str | None) -> list[str] | None:
@@ -1430,9 +1758,29 @@ def compile_tex_with_tectonic(tex_source: str, *, timeout: int | None = None) ->
             )
         with open(pdf_path, "rb") as f:
             return f.read()
+# -- LaTeX sanitizer: fix common broken unit fractions like \frac{\text{mol}{dm}^3}
+_BAD_UNIT_FRACS = {
+    r'\frac{\text{mol}{dm}^3}': r'\mathrm{mol\,dm^{-3}}',
+    r'\frac{\text{g}{cm}^3}':   r'\mathrm{g\,cm^{-3}}',
+    r'\frac{\text{kg}{m}^3}':   r'\mathrm{kg\,m^{-3}}',
+}
+# also fix the same pattern when not inside \frac{...}
+_BAD_UNIT_INLINE = {
+    r'\text{mol}{dm}^3': r'\mathrm{mol\,dm^{-3}}',
+    r'\text{g}{cm}^3':   r'\mathrm{g\,cm^{-3}}',
+    r'\text{kg}{m}^3':   r'\mathrm{kg\,m^{-3}}',
+}
+
+def fix_bad_unit_fracs(tex: str) -> str:
+    for k, v in _BAD_UNIT_FRACS.items():
+        tex = tex.replace(k, v)
+    for k, v in _BAD_UNIT_INLINE.items():
+        tex = tex.replace(k, v)
+    return tex
 
 # near compile_tex_with_tectonic
 def compile_tex_with_tectonic_to_path(tex_source: str, out_path: str, *, timeout: int | None = None) -> None:
+    tex_source = fix_bad_unit_fracs(tex_source)
     timeout = TECTONIC_TIMEOUT if timeout is None else timeout
     if shutil.which("tectonic") is None:
         raise RuntimeError("tectonic not found on PATH.")
@@ -1459,22 +1807,12 @@ def compile_tex_with_tectonic_to_path(tex_source: str, out_path: str, *, timeout
         shutil.move(pdf_src, out_path)
 
 def compile_or_repair_to_path(tex_source: str, out_path: str) -> None:
-    first = _sanitize_tex_math(tex_source)
-    try:
-        return compile_tex_with_tectonic_to_path(first, out_path)
-    except Exception:
-        second = _sanitize_tex_math(first)
-        return compile_tex_with_tectonic_to_path(second, out_path)
+    return compile_tex_with_tectonic_to_path(_sanitize_tex_math(tex_source), out_path)
+
 
 def compile_or_repair(tex_source: str, *_, **__) -> bytes:
-    # First pass: sanitize & compile
-    first = _sanitize_tex_math(tex_source)
-    try:
-        return compile_tex_with_tectonic(first)
-    except Exception:
-        # Second pass: run sanitizer again (idempotent) in case upstream injected more issues
-        second = _sanitize_tex_math(first)
-        return compile_tex_with_tectonic(second)
+    return compile_tex_with_tectonic(_sanitize_tex_math(tex_source))
+
 
 
 def parallel_map(func, iterable, max_workers=8):
@@ -1748,18 +2086,32 @@ def get_response(instruction, file, model=main_model, max_tokens=1024, temperatu
             print()  # newline after completion
         return full_content.strip()
 
+
+
     else:
-        # Non-streaming version
+
+        # Non-streaming version (use the caller-provided temperature!)
+
         response = client.chat.completions.create(
+
             model=model,
+
             messages=messages,
+
             temperature=temperature,
+
             max_tokens=max_tokens,
+
             top_p=1.0,
+
             frequency_penalty=0,
+
             presence_penalty=0
+
         )
-        return response.choices[0].message.content.strip()
+
+        return response.choices[0].message.content
+
 
 # =========================
 # Web app
@@ -3852,13 +4204,10 @@ refreshSubmitState();
             else:
                 # New contract: drive everything from qcount
                 blueprint = build_default_blueprint(qcount)
-
+            blueprint = apply_easy_bias(blueprint, difficulty_norm)  # NEW
+            blueprint = enforce_no_hard_mcq(blueprint, difficulty_norm)
             # Derive legacy counts from blueprint so the rest of the pipeline still works unchanged
             _bp_counts = counts_from_blueprint(blueprint)
-            num_long = _bp_counts["Long"]
-            num_short = _bp_counts["Short"]
-            num_mcq = _bp_counts["MCQ"]
-            num_math = _bp_counts["Math"]
             # --- Stage 4: read optional per-question overrides (exam mode only) ---
             if mode == "exam":
                 raw_types = request.form.get("q_types")
@@ -3924,12 +4273,16 @@ refreshSubmitState();
                     for i in range(N):
                         if norm_types is not None:
                             blueprint[i]["type"] = norm_types[i]
+                            blueprint[i]["_explicit_type"] = True  # NEW
+
                         if clean_topics is not None and clean_topics[i]:
                             blueprint[i]["topic"] = clean_topics[i]
+
                         if norm_diffs is not None:
                             blueprint[i]["difficulty"] = norm_diffs[i]
-
-                    # Re-derive legacy counts so the rest of the (pre-Stage-6) pipeline works unchanged
+                            blueprint[i]["_explicit_diff"] = True  # NEW
+                    blueprint = apply_easy_bias(blueprint, difficulty_norm)  # NEW
+                    blueprint = enforce_no_hard_mcq(blueprint, difficulty_norm)
                     _bp_counts = counts_from_blueprint(blueprint)
 
                     set_progress(job, 34, step=2, label="Applying per-question overrides")
@@ -4167,7 +4520,7 @@ refreshSubmitState();
                             fast_token_estimate(doc),
                             per_file_target
                         )
-
+                        max_tokens_sum = min(SUMMARY_TOKENS_HARD_MAX, int(adjusted_target * 1.35) + 120)
                         prompt = prompt_tpl.format(
                             tag=tag,
                             target_bullets=target_bullets,
@@ -4178,7 +4531,7 @@ refreshSubmitState();
 
                         futs.append((
                             local_idx,
-                            ex.submit(get_response, prompt, doc, summary_model, adjusted_target, cfg["sum_temp"])
+                            ex.submit(get_response, prompt, doc, summary_model, max_tokens_sum, cfg["sum_temp"])
                         ))
 
                     for local_idx, fut in futs:
@@ -4188,6 +4541,9 @@ refreshSubmitState();
                             s = ""
                         summaries[local_idx] = s or ""
                 bullets_per_file = [parse_tagged_bullets(s) for s in summaries]
+                # NEW: randomize bullet order within each file to avoid intra-file bias
+                for blts in bullets_per_file:
+                    random.shuffle(blts)
                 for local_idx, blts in enumerate(bullets_per_file):
                     if not blts:
                         tag = indices[local_idx] + 1
@@ -4215,8 +4571,28 @@ refreshSubmitState();
                 num_math=bp_counts["Math"],
                 total_questions=questions_needed
             )
+            # --- DEBUG DUMP OF MATERIAL FED TO MAIN QUESTIONS CALL ---
+            try:
+                # Save the raw summaries/interleaved bullets (pre-enhancement)
+                with open("DEBUG_raw_text_for_main.txt", "w", encoding="utf-8") as f_raw:
+                    f_raw.write(text_for_main)
+                print(f"[DEBUG] Wrote raw summary-concat to DEBUG_raw_text_for_main.txt ({len(text_for_main)} chars)")
+            except Exception as e:
+                print(f"[DEBUG] Failed to write DEBUG_raw_text_for_main.txt: {e}")
 
-            max_tokens_q = n_out_q_cap
+            try:
+                # Save the actual string passed to the model (post-enhancement)
+                with open("DEBUG_main_questions_material.txt", "w", encoding="utf-8") as f_enh:
+                    f_enh.write(enhanced_material)
+                print(
+                    f"[DEBUG] Wrote enhanced material to DEBUG_main_questions_material.txt ({len(enhanced_material)} chars)")
+            except Exception as e:
+                print(f"[DEBUG] Failed to write DEBUG_main_questions_material.txt: {e}")
+
+            # Optional quick console preview (trim to avoid flooding logs)
+            print("[DEBUG] Full enhanced material passed to main questions call:\n" + enhanced_material)
+            # --- END DEBUG DUMP ---
+            max_tokens_q = int(n_out_q_cap * (1.20 if (difficulty_norm or "medium") == "hard" else 1.0))
             questions = get_response(
                 instruction_q,
                 enhanced_material,
@@ -4247,27 +4623,19 @@ refreshSubmitState();
                 q_items += split_numbered_items(cont)[: (questions_needed - len(q_items))]
             q_items = clamp_items(q_items, questions_needed)
             q_items = strip_headers_from_items(q_items)
-
+            # Upgrade trivial-looking HARD items (any type); capped to keep runtime tight
+            q_items = enforce_hard_items(
+                q_items, blueprint, difficulty_norm, model=main_model, n_out_q_cap=n_out_q_cap, max_regens=2
+            )
+            # Enforce truly hard Math by rewriting trivial items (caps at 2 rewrites)
+            q_items = enforce_hard_math(
+                q_items, blueprint, difficulty_norm, model=main_model, n_out_q_cap=n_out_q_cap, max_regens=2
+            )
             # LaTeX-safe transform + fixers
             def process_latex_item(item: str) -> str:
-                # 0) Normalize text & basic mapping
-                item = latex_backup_translate(normalize_for_latex(item))
-
-                # 1) Bring any math-y fragments INTO math first
-                item = _wrap_naked_math(item)
-
-                # 2) Inside-math structural fixes (vectors/hats and bad frac forms)
-                item = _fix_veclike_args_in_math(item)
-                item = _fix_text_macros_in_math(item)
-                item = _fix_frac_forms_in_math(item)
-
-                # 3) Convert inline a/b only INSIDE math into \frac{a}{b}
-                item = convert_slashes_only_inside_math(item)
-
-                # 4) Your existing malformed \frac + backslash sanitizers
-                item = _fix_malformed_frac_text(item)
-                item = _sanitize_backslashes(item)
-
+                item = normalize_for_latex(item)
+                item = _escape_percent_outside_math(item)  # NEW
+                item = _sanitize_tex_math(item)
                 return item
 
             q_items = parallel_map(lambda i, item: process_latex_item(item), q_items, max_workers=4)
@@ -4319,15 +4687,11 @@ refreshSubmitState();
             a_items = strip_headers_from_items(a_items)
             # After you build a_items:
             # --- ANSWERS SANITIZE (mirror questions + new sqrt/frac fixes) ---
-            a_items = [latex_backup_translate(normalize_for_latex(it)) for it in a_items]
-            a_items = [_wrap_naked_math(it) for it in a_items]
-            a_items = [_fix_veclike_args_in_math(it) for it in a_items]
-            a_items = [_fix_frac_forms_in_math(it) for it in a_items]
-            a_items = [_fix_sqrt_args_in_math(it) for it in a_items]  # NEW
-            a_items = [_fix_frac_sqrt_edgecases_in_math(it) for it in a_items]  # NEW
-            a_items = [convert_slashes_only_inside_math(it) for it in a_items]
-            a_items = [_fix_malformed_frac_text(it) for it in a_items]
-            a_items = [_sanitize_backslashes(it) for it in a_items]
+            # --- ANSWERS SANITIZE (simple) ---
+            a_items = [normalize_for_latex(it) for it in a_items]
+            a_items = [_escape_percent_outside_math(it) for it in a_items]  # NEW
+            a_items = [_sanitize_tex_math(it) for it in a_items]
+
             set_progress(job, 85, step=5, label="Mark scheme ready")
             if is_canceled(job): return ("Canceled", 499)
             # Build & compile
@@ -4336,8 +4700,8 @@ refreshSubmitState();
             set_progress(job, 90, step=5, label="Compiling mark scheme")
             if is_canceled(job): return ("Canceled", 499)
             a_tex = tex_from_items(a_items, default_title.title() + " Answers")
-            q_tex = _emergency_tex_sanitize(q_tex)
-            a_tex = _emergency_tex_sanitize(a_tex)
+            q_tex = fix_bad_unit_fracs(q_tex)
+            a_tex = fix_bad_unit_fracs(a_tex)
             set_progress(job, 90, step=5, label="Compiling PDFs")
             if is_canceled(job): return ("Canceled", 499)
             q_path = os.path.join(OUTPUT_DIR, "questions.pdf")
