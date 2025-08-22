@@ -152,18 +152,46 @@ pip install werkzeug
 
 ## 🎬 Demo & Live Preview
 
-### 📹 **Full Demo Video**
+### 📹 **Full Demo Video** 
 [![Demo Video](https://img.youtube.com/vi/yOrRvX-MMpw/maxresdefault.jpg)](https://youtu.be/yOrRvX-MMpw)
-*Click to watch: Complete walkthrough from upload to PDF generation*
+*Example: GCSE Chemistr*
 
 ### 🌐 **Try It Live**
 **[🔗 Live Demo](https://ai-exam-generator-3e73.onrender.com)** - *No signup required*
 
-### 📊 **Real Example**
-**Input**: Chemistry textbook chapter (15 pages)  
-**Output**: 10-question thermodynamics exam + detailed mark scheme  
-**Time**: 47 seconds  
-**Quality**: Publication-ready LaTeX formatting
+---
+
+### 🖼️ **Visual Walkthrough - Alternative Example**
+*Different subject area to demonstrate versatility*
+
+**Step 1: Upload & Configure**
+![Upload Interface](screenshots/one.png)
+*Clean interface with drag-and-drop file upload and exam configuration*
+
+**Step 2: Advanced Customization** 
+![Advanced Controls](screenshots/two.png)
+*Per-question difficulty, type, and instruction customization with drag-and-drop reordering*
+
+**Step 3: Real-time Generation**
+![Progress Tracking](screenshots/three.png)
+*Live progress with time estimates and detailed step breakdown*
+
+**Step 4: Professional Output**
+![Generated PDFs](screenshots/four.png)
+![Mark Scheme](screenshots/five.png)
+*LaTeX-compiled exam paper and detailed marking scheme*
+
+---
+
+### 📊 **Multiple Subject Examples**
+
+| Example | Input | Output | Time |
+|---------|--------|---------|------|
+| **Video Demo** | GCSE Chemistry | 7 question chemistry exam + mark scheme | 47s |
+| **Screenshots** | A-Level Maths | 3 question math exam + mark scheme | ~45s |
+| **Live Demo** | *Try your own materials* | Custom exam paper | 30-60s |
+
+*Demonstrates cross-subject adaptabilit
 
 ## Usage
 
