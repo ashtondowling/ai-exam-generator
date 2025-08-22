@@ -1,374 +1,208 @@
-# Exam Paper Generator
+# Mock Exam Paper Generator
 
-A sophisticated AI-powered web application that transforms study materials into professional mock exam papers and comprehensive marking schemes. Built with Flask, OpenAI's GPT models, LaTeX compilation, and advanced OCR processing.
+A Flask web application that automatically generates professional mock exam papers and mark schemes from uploaded study materials using AI.
 
-## 🌟 Features
+## Features
 
-### Core Functionality
-- **Multi-format Support**: Process .txt, .pdf, .docx, .pptx, and .rtf files
-- **OCR Processing**: Extract text from scanned PDFs and image-based documents using Tesseract OCR
-- **AI-Powered Generation**: Uses OpenAI GPT models to create intelligent questions and detailed marking schemes
-- **Professional Output**: Generates polished PDF documents using LaTeX/Tectonic compilation
-- **Real-time Progress**: Live progress tracking with estimated completion times
-- **Advanced Customization**: Per-question control over types, difficulty, and additional instructions
+### 📄 File Processing
+- **Multi-format support**: .txt, .pdf, .docx, .pptx, .rtf
+- **OCR capability**: Extracts text from image-based PDFs using Tesseract
+- **Smart text extraction**: Handles encrypted PDFs, zip bombs, and malformed files
+- **Duplicate detection**: Automatically removes duplicate content via SHA-256 hashing
 
-### Question Types
-- **Long Answer**: Analytical questions requiring detailed responses (40-120 words)
-- **Short Answer**: Concise concept-based questions (8-25 words)  
-- **Multiple Choice**: Four-option questions with plausible distractors
-- **Math/Calculation**: Mathematical problems with step-by-step solutions
+### 🎯 Question Generation
+- **4 Question Types**: Long answer, Short answer, Multiple Choice (MCQ), Math/Calculation
+- **3 Difficulty Levels**: Easy, Medium, Hard with adaptive complexity
+- **Smart content analysis**: AI identifies and prioritizes exam-relevant material
+- **LaTeX math support**: Comprehensive Unicode-to-LaTeX conversion for mathematical content
 
-### Security & Performance
-- Rate limiting and basic authentication
-- File validation and security scanning
-- Concurrent processing with thread pools
-- Progress pruning and memory management
-- Comprehensive error handling
+### ⚙️ Advanced Customization
+- **Per-question control**: Set individual question types, difficulties, and additional instructions
+- **Drag-and-drop reordering**: Rearrange questions in the advanced interface
+- **Blueprint-driven generation**: Precise control over exam structure
+- **Math-heavy optimization**: Enhanced processing for calculation-heavy subjects
 
-## 🚀 Quick Start
+### 📊 PDF Output
+- **Professional formatting**: Clean, exam-ready PDFs using LaTeX/Tectonic
+- **Two documents**: Separate question paper and detailed mark scheme
+- **Chemical notation**: Full support for chemical arrows and scientific symbols
+- **Error recovery**: Automatic LaTeX error fixing and compilation retry
 
-### Prerequisites
-- Python 3.8+
-- [Tectonic](https://tectonic-typesetting.github.io/) LaTeX engine
-- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) engine
-- OpenAI API key
+### 🔒 Security & Performance
+- **Rate limiting**: Per-IP limits on uploads, downloads, and status checks
+- **File validation**: Content-type verification and malware protection
+- **Progress tracking**: Real-time generation status with time estimates
+- **Concurrent processing**: Parallel file processing and AI calls
+- **Memory management**: Smart token budgeting and text chunking
 
-### Installation
+## Requirements
 
-1. **Clone and setup**:
+### System Dependencies
 ```bash
-git clone <repository-url>
-cd exam-generator
-pip install -r requirements.txt
+# LaTeX compiler (required)
+tectonic
+
+# OCR support (optional but recommended)
+tesseract-ocr
 ```
 
-2. **Install Tectonic**:
+### Python Dependencies
 ```bash
-# On macOS with Homebrew
-brew install tectonic
-
-# On Ubuntu/Debian
-curl --proto '=https' --tlsv1.2 -fsSL https://drop-sh.fullyjustified.net | sh
-
-# On Windows
-# Download from https://github.com/tectonic-typesetting/tectonic/releases
+pip install flask openai python-dotenv
+pip install python-docx PyMuPDF pdfplumber
+pip install python-pptx striprtf pillow pytesseract
+pip install werkzeug
 ```
 
-3. **Install Tesseract OCR**:
-```bash
-# On macOS with Homebrew
-brew install tesseract
+## Setup
 
-# On Ubuntu/Debian
-sudo apt-get install tesseract-ocr tesseract-ocr-eng
+1. **Install system dependencies**:
+   ```bash
+   # Ubuntu/Debian
+   sudo apt install tectonic tesseract-ocr
+   
+   # macOS
+   brew install tectonic tesseract
+   ```
 
-# On Windows
-# Download from https://github.com/UB-Mannheim/tesseract/wiki
-# Add installation folder to PATH (e.g., C:\Program Files\Tesseract-OCR)
-```
+2. **Clone and install**:
+   ```bash
+   git clone <repository-url>
+   cd <repository-name>
+   pip install -r requirements.txt
+   ```
 
-4. **Environment Configuration**:
-```bash
-# Required
-export OPENAI_API_KEY="your-openai-api-key"
+3. **Configure environment**:
+   ```bash
+   # Create .env file
+   OPENAI_API_KEY=your_openai_api_key_here
+   
+   # Optional configuration
+   APP_HOST=0.0.0.0
+   APP_PORT=5000
+   FLASK_DEBUG=0
+   
+   # Model selection
+   OPENAI_MODEL_MAIN=gpt-4o-mini
+   OPENAI_MODEL_SUMMARY=gpt-4o-mini
+   
+   # File limits
+   APP_MAX_FILES=30
+   APP_MAX_FILE_MB=25
+   APP_TOTAL_UPLOAD_MB=100
+   
+   # Security (optional)
+   APP_BASIC_AUTH=0
+   APP_USER=admin
+   APP_PASS=admin
+   ```
 
-# Optional customization
-export OPENAI_BASE_URL="https://api.openai.com/v1"  # Custom endpoint
-export APP_MAX_FILES=30                              # Max files per upload
-export APP_MAX_FILE_MB=25                           # Per-file size limit
-export APP_TOTAL_UPLOAD_MB=100                      # Total upload limit
+4. **Run the application**:
+   ```bash
+   python exam.py
+   ```
 
-# OCR Configuration
-export APP_ENABLE_OCR=1                             # Enable OCR processing
-export APP_OCR_DPI=300                              # OCR render quality
-export APP_OCR_LANG=eng                             # Tesseract language
-```
+## Usage
 
-5. **Run the application**:
-```bash
-python exam.py
-```
-
-Visit `http://localhost:5000` to access the web interface.
-
-## 📊 Usage
-
-### Basic Workflow
-
-1. **Upload Materials**: Drag and drop or select study files (including scanned PDFs)
-2. **Configure Options**: 
-   - Set exam title
-   - Choose number of questions (1-30)
-   - Select difficulty level (Easy/Medium/Hard)
-3. **Advanced Settings** (Optional):
-   - Customize individual question types
-   - Set per-question difficulty levels
-   - Add specific instructions per question
+1. **Upload study materials**: Drag and drop or select files (.txt, .pdf, .docx, .pptx, .rtf)
+2. **Set exam parameters**: Choose title, number of questions, and global difficulty
+3. **Advanced customization** (optional): 
+   - Toggle per-question topic instructions
+   - Set individual question difficulties
+   - Customize question types
+   - Reorder questions via drag-and-drop
 4. **Generate**: Click "Generate PDFs" and monitor real-time progress
-5. **Download**: Receive professional PDF question paper and marking scheme
+5. **Download**: Get both the question paper and mark scheme as separate PDFs
 
-### Advanced Question Customization
-
-Click "Advanced" to access per-question controls:
-
-- **Question Types**: Mix Long, Short, MCQ, and Math questions
-- **Individual Difficulty**: Override global difficulty per question
-- **Additional Instructions**: Add specific requirements (e.g., "Make this a multi-part question about thermodynamics")
-- **Drag & Drop Reordering**: Rearrange question order visually
-
-### File Processing
-
-The system intelligently processes various document formats:
-- **PDF**: Extracts text using PyMuPDF with pdfplumber fallback, and OCR for scanned/image-based content
-- **Word Documents**: Processes .docx files paragraph by paragraph
-- **PowerPoint**: Extracts text from .pptx slides and shapes
-- **RTF**: Converts rich text format to plain text
-- **Text Files**: Supports UTF-8 and UTF-16 encoding
-
-**OCR Processing**: When PDFs contain scanned images or non-selectable text, the system automatically falls back to OCR processing using Tesseract, ensuring maximum text extraction from challenging documents.
-
-## ⚙️ Configuration
-
-### Environment Variables
-
-#### Core Settings
-```bash
-OPENAI_API_KEY=your-key-here          # Required: OpenAI API key
-OPENAI_BASE_URL=custom-endpoint       # Optional: Custom API endpoint
-OPENAI_MODEL_MAIN=gpt-4o-mini        # Main generation model
-OPENAI_MODEL_SUMMARY=gpt-4o-mini     # Summarization model
-```
-
-#### File Limits
-```bash
-APP_MAX_FILES=30                      # Maximum files per upload
-APP_MAX_FILE_MB=25                   # Per-file size limit (MB)
-APP_TOTAL_UPLOAD_MB=100              # Total upload limit (MB)
-APP_TXT_CHAR_LIMIT=1000000           # Text file character limit
-APP_PDF_PAGE_LIMIT=2000              # PDF page processing limit
-```
-
-#### OCR Settings
-```bash
-APP_ENABLE_OCR=1                     # Enable/disable OCR processing
-APP_OCR_DPI=300                      # OCR render quality (150-600)
-APP_OCR_LANG=eng                     # Tesseract language codes
-APP_OCR_PAGE_LIMIT=2000              # Max pages to OCR process
-```
-
-#### Performance Tuning
-```bash
-APP_SUMMARY_TOKENS=350               # Target summary length
-APP_Q_INPUT_CAP=12000               # Question generation input cap
-APP_Q_OUT_CAP=4000                  # Question output token limit
-APP_A_OUT_CAP=2500                  # Answer output token limit
-TECTONIC_TIMEOUT=45                 # LaTeX compilation timeout
-```
-
-#### Security & Rate Limiting
-```bash
-APP_BASIC_AUTH=1                     # Enable basic authentication
-APP_USER=admin                       # Auth username
-APP_PASS=secure-password            # Auth password
-APP_RATE_UPLOADS_PER_MIN=6          # Upload rate limit
-APP_RATE_STATUS_PER_10S=50          # Status check rate limit
-APP_RATE_DOWNLOADS_PER_MIN=60       # Download rate limit
-```
-
-### Difficulty Profiles
-
-Each difficulty level adjusts generation behavior:
-
-- **Easy**: Shorter questions, stable generation, core topics focus
-- **Medium**: Balanced approach, moderate complexity
-- **Hard**: Longer scenarios, multi-step reasoning, edge cases
-
-## 🏗️ Architecture
-
-### Backend Components
-
-```
-exam.py
-├── Flask Application Setup
-├── File Processing Pipeline
-│   ├── Multi-format document parsing
-│   ├── OCR text extraction with Tesseract
-│   ├── Content validation and security
-│   └── Text extraction and normalization
-├── AI Generation Pipeline
-│   ├── Intelligent summarization
-│   ├── Question generation with blueprints
-│   └── Marking scheme creation
-├── LaTeX Processing
-│   ├── Mathematical notation handling
-│   ├── Template-based PDF generation
-│   └── Tectonic compilation
-└── Progress & Security Systems
-    ├── Real-time progress tracking
-    ├── Rate limiting and authentication
-    └── Error handling and recovery
-```
-
-### Frontend Features
-
-- **Modern UI**: Dark/light mode support with smooth animations
-- **Drag & Drop**: Intuitive file upload with visual feedback
-- **Advanced Controls**: Collapsible per-question customization
-- **Progress Visualization**: Real-time progress with step-by-step breakdown
-- **Responsive Design**: Works on desktop and mobile devices
-
-### Processing Pipeline
-
-1. **File Ingestion**: Multi-threaded document processing with OCR fallback
-2. **Content Analysis**: Token estimation and summarization planning
-3. **AI Generation**: Blueprint-driven question and answer creation
-4. **LaTeX Compilation**: Mathematical notation processing and PDF generation
-5. **Delivery**: Secure download links with progress completion
-
-## 🔧 API Endpoints
+## API Endpoints
 
 ### Core Endpoints
-- `GET /` - Main application interface
-- `POST /upload` - File upload and generation trigger
-- `GET /status?job=<id>` - Real-time progress polling
+- `GET /` - Main web interface
+- `POST /upload` - Generate exam papers (supports file uploads and form data)
+- `GET /status?job=<id>` - Check generation progress
 - `POST /cancel` - Cancel ongoing generation
-- `GET /download/<type>` - Download generated PDFs
+- `GET /download/questions` - Download question paper PDF
+- `GET /download/answers` - Download mark scheme PDF
 
-### Utility Endpoints
-- `GET /healthz` - Health check (liveness probe)
-- `GET /readyz` - Readiness check with dependency validation
-- `GET /smoke/local` - LaTeX compilation test
+### Health & Monitoring
+- `GET /healthz` - Liveness check
+- `GET /readyz` - Readiness check (validates dependencies)
+- `GET /download/manifest` - Get metadata about last generation
 
-## 🛡️ Security Features
+### Development
+- `GET /smoke/local` - Test LaTeX compilation
 
-### Input Validation
-- File type and content verification
-- Size limits and zip bomb protection
-- Content sanitization for LaTeX injection prevention
-- PDF encryption detection
+## Configuration Options
 
-### Rate Limiting
-- Per-IP upload limits
-- Status polling rate limits
-- Download frequency controls
-- Configurable thresholds
-
-### Authentication
-- Optional basic authentication
-- Request ID tracking
-- Security headers (X-Frame-Options, CSP-ready)
-- Input sanitization
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**Tectonic Not Found**
+### File Processing
 ```bash
-# Verify installation
-tectonic --version
-
-# Add to PATH if needed
-export PATH="$HOME/.cargo/bin:$PATH"
+APP_TXT_CHAR_LIMIT=1000000        # Max characters per text file
+APP_PDF_PAGE_LIMIT=2000           # Max PDF pages to process
+APP_DOCX_PARA_LIMIT=50000         # Max paragraphs per Word doc
+APP_TOTAL_TEXT_CHAR_CAP=3000000   # Total text limit across all files
 ```
 
-**Tesseract OCR Issues**
+### OCR Settings
 ```bash
-# Verify installation
-tesseract --version
-
-# Check language data
-tesseract --list-langs
-
-# On Windows, ensure PATH includes Tesseract folder
-# e.g., C:\Program Files\Tesseract-OCR
+APP_ENABLE_OCR=1                  # Enable OCR for image-based PDFs
+APP_OCR_DPI=300                   # Rendering DPI for OCR
+APP_OCR_LANG=eng                  # Tesseract language (e.g., "eng+deu")
 ```
 
-**LaTeX Compilation Errors**
-- Check `/readyz` endpoint for system status
-- Review mathematical notation in source materials
-- Increase `TECTONIC_TIMEOUT` for complex documents
-
-**File Processing Failures**
-- Verify file isn't corrupted or password-protected
-- Check file size against configured limits
-- Ensure proper file extensions
-- For scanned PDFs, verify OCR is enabled (`APP_ENABLE_OCR=1`)
-
-**OCR Performance Issues**
-- Reduce `APP_OCR_DPI` for faster processing (try 150-200)
-- Increase `APP_OCR_PAGE_LIMIT` if needed
-- Check Tesseract language data for non-English content
-
-**OpenAI API Issues**
-- Verify API key validity
-- Check rate limits on OpenAI account
-- Monitor token usage for large documents
-
-### Debug Mode
+### AI Model Settings
 ```bash
-export FLASK_DEBUG=1
-python exam.py
+APP_SUMMARY_TOKENS=700            # Target tokens per file summary
+APP_Q_INPUT_CAP=12000            # Max input tokens for question generation
+APP_Q_OUT_CAP=4000               # Max output tokens for questions
+APP_A_OUT_CAP=2500               # Max output tokens for answers
 ```
 
-## 📋 Dependencies
-
-### Core Requirements
-```
-flask>=2.3.0
-openai>=1.0.0
-python-dotenv>=1.0.0
-werkzeug>=2.3.0
+### Security & Rate Limiting
+```bash
+APP_RATE_UPLOADS_PER_MIN=6        # Upload requests per IP per minute
+APP_RATE_STATUS_PER_10S=50        # Status checks per IP per 10 seconds
+APP_RATE_DOWNLOADS_PER_MIN=60     # Downloads per IP per minute
 ```
 
-### Document Processing
+## Architecture
+
+### Question Generation Pipeline
+1. **File Processing**: Extract and normalize text from uploaded files
+2. **Content Analysis**: Create intelligent summaries optimized for exam content
+3. **Question Generation**: AI generates questions following the specified blueprint
+4. **Answer Generation**: Create detailed mark schemes with multiple acceptable answers
+5. **LaTeX Processing**: Convert mathematical notation and compile to PDF
+6. **Quality Assurance**: Validate and repair LaTeX, upgrade trivial questions
+
+### Smart Features
+- **Adaptive summarization**: Chooses between full text or summaries based on content length
+- **Math enhancement**: Prioritizes mathematical content when generating calculation questions
+- **Difficulty enforcement**: Automatically upgrades questions that don't meet difficulty requirements
+- **LaTeX sanitization**: Comprehensive Unicode-to-LaTeX conversion with error recovery
+
+## Development
+
+### Testing
+```bash
+# Test LaTeX compilation
+curl http://localhost:5000/smoke/local
+
+# Health checks
+curl http://localhost:5000/healthz
+curl http://localhost:5000/readyz
 ```
-python-docx>=0.8.11
-PyMuPDF>=1.23.0
-pdfplumber>=0.9.0
-python-pptx>=0.6.21
-striprtf>=0.0.26
-pytesseract>=0.3.10
-Pillow>=9.0.0
-```
 
-### System Requirements
-- **Tectonic**: LaTeX engine for PDF compilation
-- **Tesseract OCR**: Text extraction from images and scanned documents
-- **Python 3.8+**: Core runtime
-- **OpenAI API**: GPT model access
+### Logging
+The application logs to stdout with configurable levels. Key events include:
+- File processing progress
+- AI model calls and token usage
+- LaTeX compilation status
+- Security events (rate limiting, authentication)
 
-## 📄 License
+## License
 
-This project is designed for educational and internal use. Please ensure compliance with OpenAI's usage policies and any institutional requirements.
+[Add your license information here]
 
-## 🤝 Contributing
+## Contributing
 
-For improvements and bug fixes:
-1. Fork the repository
-2. Create a feature branch
-3. Test thoroughly with various document types (including scanned PDFs)
-4. Submit a pull request with detailed description
-
-## 📞 Support
-
-For issues and questions:
-- Check the troubleshooting section
-- Review logs for detailed error messages
-- Verify environment configuration (including OCR setup)
-- Test with the `/smoke/local` endpoint for LaTeX functionality
-- Use debug mode to check OCR processing for problematic PDFs
-
-## 📸 Demo
-
-### Screenshots
-![Upload Interface](screenshots/upload.png)
-![Question Customization](screenshots/advanced.png) 
-![Generated PDF Sample](screenshots/output1.png)
-![Generated PDF Sample](screenshots/output2.png)
-
-### Live Demo
-[Try it here](your-deployed-url) (Note: Requires OpenAI API key)
-
-### Video Walkthrough
-[2-minute demo video](youtube-link)
+[Add contribution guidelines here]
