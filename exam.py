@@ -938,7 +938,7 @@ def enhance_math_content_for_questions(text_for_main: str, num_math: int, total_
     math_ratio = num_math / total_questions
 
     prefix = (
-        "Match step counts by difficulty: easy 1–2, medium 3-4, hard 4–6 with linked subparts. "
+        "Match step counts by difficulty: easy 1, medium 3-4, hard 4–6 with linked subparts. "
         "Prefer exact forms when sensible; avoid trivial plug-in.\n\n"
     )
 
@@ -1231,15 +1231,15 @@ def _difficulty_profile_for_prompt(global_diff: str | None):
     SHORT_RANGE = {"easy": "6-10", "medium": "10-18", "hard": "14-24"}
 
     diff_line_map = {
-        "easy":   "Ensure questions are accessible and cover core topics; prioritize clarity over trickiness.",
+        "easy":   "Ensure questions are easy, accessible and cover core topics; prioritize clarity over trickiness.",
         "medium": "Ensure questions require multi-step problem solving, conceptual understanding, and application of principles in unfamiliar contexts.",
         "hard":   "Ensure questions are non-routine, multi-step, and integrate ideas; still solvable with standard methods for the intended level.",
     }
     diff_guidance_map = {
         "easy": (
-            "- Single-idea prompts; no contrived contexts\n"
-            "- Avoid multi-step algebraic traps; keep MCQ distractors simple\n"
-            "- Prefer Short/MCQ/Math; avoid Long unless explicitly requested in Advanced.\n"
+            "- Single-idea prompts; no contrived contexts, no asking student to explain or discuss concepts.\n"
+            "- Avoid multi-step; keep MCQ distractors simple\n"
+            "- Prioritize very simple, short questions, can involve MCQ/Math; avoid long questions unless explicitly requested in Advanced.\n"
             + _math_difficulty_rubric("easy")
         ),
         "medium": (
