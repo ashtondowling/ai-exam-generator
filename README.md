@@ -154,7 +154,7 @@ pip install werkzeug
 
 ### 📹 **Full Demo Video** 
 [![Demo Video](https://img.youtube.com/vi/yOrRvX-MMpw/maxresdefault.jpg)](https://youtu.be/yOrRvX-MMpw)
-*Example: GCSE Chemistr*
+*Example: GCSE Chemistry*
 
 ### 🌐 **Try It Live**
 **[🔗 Live Demo](https://ai-exam-generator-3e73.onrender.com)** - *No signup required*
@@ -191,7 +191,7 @@ pip install werkzeug
 | **Screenshots** | A-Level Maths | 3 question math exam + mark scheme | ~45s |
 | **Live Demo** | *Try your own materials* | Custom exam paper | 30-60s |
 
-*Demonstrates cross-subject adaptabilit
+*Demonstrates cross-subject adaptability
 
 ## Usage
 
