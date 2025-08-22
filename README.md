@@ -137,7 +137,7 @@ pip install werkzeug
 ## Demo
 
 ### 📹 Video Walkthrough
-[📹 Watch demo video](https://youtu.be/yOrRvX-MMpw)
+[Watch demo video](https://youtu.be/yOrRvX-MMpw)
 
 ### 🖼️ Screenshots
 
