@@ -137,25 +137,25 @@ pip install werkzeug
 ## Demo
 
 ### 📹 Video Walkthrough
-(https://youtu.be/yOrRvX-MMpw)
+[📹 Watch demo video](https://youtu.be/yOrRvX-MMpw)
 
 ### 🖼️ Screenshots
 
 **Main Interface - File Upload & Configuration**
-(screenshots/one.png)
+![Upload Interface](screenshots/one.png)
 
 **Advanced Question Customization**
-(screenshots/two.png)
+![Upload Interface](screenshots/two.png)
 
 **Real-time Progress Tracking**
-(screenshots/three.png)
+![Upload Interface](screenshots/three.png)
 
 **Generated Output - Professional PDFs**
-(screenshots/four.png)
-(screenshots/five.png)
+![Upload Interface](screenshots/four.png)
+![Upload Interface](screenshots/five.png)
 
 ### 🎯 Live Demo
-(https://ai-exam-generator-3e73.onrender.com)
+[🔗 Try it live](https://ai-exam-generator-3e73.onrender.com)
 
 ### Sample Input → Output
 **Input**: *"Upload a chemistry textbook chapter on thermodynamics"*
@@ -312,29 +312,7 @@ The application logs to stdout with configurable levels. Key events include:
 
 ## License
 
-[Add your license information here]
-
-## 🎬 Demo
-
-### Live Demo
-[🔗 Try it live](your-hosted-url) | [📹 Watch demo video](youtube-link)
-
-### Screenshots
-![Upload Interface](screenshots/upload-interface.png)
-*Clean, modern interface supporting multiple file formats with real-time validation*
-
-![Advanced Question Customization](screenshots/advanced-controls.png)
-*Per-question type, difficulty, and instruction customization with drag-and-drop reordering*
-
-![Real-time Progress](screenshots/progress-tracking.png)
-*Live progress tracking with time estimates and step-by-step status*
-
-![Generated PDF Output](screenshots/pdf-output.png)
-*Professional LaTeX-compiled exam papers with mathematical notation*
-
-### Sample Output
-- [📄 Sample Question Paper](samples/physics-mock-questions.pdf)
-- [📝 Sample Mark Scheme](samples/physics-mock-answers.pdf)
+Use this however you wish, just please leave credit :)
 
 - ## 📈 Project Metrics
 - **Processing Capacity**: Handles up to 30 files (750MB total) per generation
