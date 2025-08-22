@@ -1202,6 +1202,45 @@ def counts_from_blueprint(bp: list[dict]) -> dict:
         if t in counts:
             counts[t] += 1
     return counts
+# --- NEW: simple math-content detector ---
+_MATH_LATEX_PATS = [
+    r'(?<!\\)\$[^$]+\$', r'\\\([^)]*\\\)', r'\\\[[^\]]*\\\]',
+    r'\\frac\b', r'\\sqrt\b', r'\\int\b', r'\\sum\b', r'\\lim\b',
+    r'\\log\b', r'\\sin\b', r'\\cos\b', r'\\tan\b', r'\\pi\b',
+]
+_MATH_UNICODE_PATS = [r'[∑∫√≤≥±≈≠∞∝πΩα-ω]']
+_MATH_OPS_PATS = [r'(?<!\w)[+\-*/^=](?!\w)']
+_MATH_EQ_PATS = [r'\b\d+(?:\.\d+)?\s*[+\-*/^=]\s*\d', r'=\s*\d']
+
+_math_regexes = [re.compile(p, re.S|re.I) for p in (
+    _MATH_LATEX_PATS + _MATH_UNICODE_PATS + _MATH_OPS_PATS + _MATH_EQ_PATS
+)]
+
+def looks_mathematical_docs(docs: list[str]) -> bool:
+    """
+    Heuristic: true if we see clear LaTeX/math markup OR many math tokens
+    relative to text length. Safe, fast, and robust to OCR noise.
+    """
+    if not docs:
+        return False
+    text = ("\n".join(docs))[:200_000]  # cap for speed
+    if not text.strip():
+        return False
+
+    hits = 0
+    for rx in _math_regexes:
+        hits += len(rx.findall(text))
+
+    # signal 1: multiple LaTeX/math markers present
+    has_delims = sum(len(re.findall(p, text, flags=re.S|re.I)) for p in _MATH_LATEX_PATS) >= 2
+
+    # signal 2: numeric/ops density
+    words = max(1, len(re.findall(r'\w+', text)))
+    nums  = len(re.findall(r'\b\d+(?:\.\d+)?\b', text))
+    ops   = len(re.findall(r'[+\-*/^=]', text))
+    density = (nums + ops) / words
+
+    return has_delims or hits >= 30 or (hits >= 10 and density >= 0.08) or density >= 0.14
 
 # --- Stage 5: token cap estimation from blueprint ---
 def estimate_output_token_caps_from_bp(blueprint: list[dict]) -> tuple[int, int]:
@@ -4444,7 +4483,19 @@ refreshSubmitState();
                 return "No valid files to process", 400
 
             per_file_tokens = [fast_token_estimate(d) for d in docs]
+            # --- NEW: if materials are mathematical and user didn't specify types, force all to Math ---
+            try:
+                # treat "no types" as: param absent, empty string, or explicit empty array string
+                _raw_qtypes = request.form.get("q_types")
+                _no_types = (_raw_qtypes is None) or (str(_raw_qtypes).strip() in ("", "[]"))
 
+                if legacy_total == 0 and _no_types and looks_mathematical_docs(docs):
+                    for it in blueprint:
+                        it["type"] = "Math"  # keep any per-item topic/difficulty already applied
+                    set_progress(job, 28, step=2, label="Auto-set all question types to Math (math content detected)")
+            except Exception:
+                # detector must never break generation; if anything goes wrong, silently continue
+                pass
             # --- Stage 8: qpaper mode (answers-only) ---
             raw_total_tokens = sum(per_file_tokens)
             raw_avg_tokens = max(1, raw_total_tokens // n_files)
