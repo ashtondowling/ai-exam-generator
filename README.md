@@ -187,8 +187,8 @@ pip install werkzeug
 
 | Example | Input | Output | Time |
 |---------|--------|---------|------|
-| **Video Demo** | GCSE Chemistry | 7 question chemistry exam + mark scheme | 47s |
-| **Screenshots** | A-Level Maths | 3 question math exam + mark scheme | ~45s |
+| **Video Demo** | GCSE Chemistry | 7 question chemistry exam + mark scheme | 50s |
+| **Screenshots** | A-Level Maths | 3 question math exam + mark scheme | 35s |
 | **Live Demo** | *Try your own materials* | Custom exam paper | 30-60s |
 
 *Demonstrates cross-subject adaptability
