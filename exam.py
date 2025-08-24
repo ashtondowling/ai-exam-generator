@@ -2864,16 +2864,6 @@ details[open] .adv-summary::after{
           <div class="step-text">Compiling PDFs...</div>
           <div class="step-time" id="time5"></div>
         </div>
-        <div class="progress-step">
-          <div class="step-icon pending" id="step6">6</div>
-          <div class="step-text">Polishing questions...</div>
-          <div class="step-time" id="time6"></div>
-        </div>
-        <div class="progress-step">
-          <div class="step-icon pending" id="step7">7</div>
-          <div class="step-text">Polishing answers...</div>
-          <div class="step-time" id="time7"></div>
-        </div>
       </div>
     </div>
     <!-- Downloads -->
@@ -4746,9 +4736,7 @@ refreshSubmitState();
             a_path = os.path.join(OUTPUT_DIR, "answers.pdf")
 
             # compile sequentially, directly to disk (no giant in-RAM PDFs)
-            set_progress(job, 90, step=6, label="Polishing questions...")
             compile_or_repair_to_path(q_tex, q_path)
-            set_progress(job, 90, step=7, label="Polishing answers...")
             compile_or_repair_to_path(a_tex, a_path)
             _write_run_meta(
                 mode="exam",
@@ -4756,7 +4744,7 @@ refreshSubmitState();
                 available=["questions", "answers"],
                 extra={"n_items": len(q_items)}
             )
-            set_progress(job, 100, step=7, label="Ready to download", status="done")
+            set_progress(job, 100, step=5, label="Ready to download", status="done")
 
             links = (
                 '<p style="margin-top:10px;">'
