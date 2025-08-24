@@ -1,13 +1,16 @@
 from dotenv import load_dotenv  # NEW
-load_dotenv(override=False)     # NEW – read .env if present, but don't clobber real env
+
+load_dotenv(override=False)  # NEW – read .env if present, but don't clobber real env
 from flask import Flask, render_template, request, send_from_directory
 import docx
 import fitz  # PyMuPDF
+
 try:
     import pdfplumber
 except Exception:
     pdfplumber = None
 import io  # NEW
+
 try:  # NEW — optional OCR deps
     import pytesseract
     from PIL import Image
@@ -35,6 +38,7 @@ import shutil, subprocess, tempfile, os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import BoundedSemaphore
 import os
+
 os.environ["APP_ENABLE_OCR"] = "1"  # Force enable OCR
 _TEX_PAR = int(os.getenv("APP_TEX_PARALLEL", "1"))
 _TEX_SEM = BoundedSemaphore(max(1, _TEX_PAR))
@@ -47,18 +51,20 @@ logging.basicConfig(
 PROGRESS_TTL_SEC = 24 * 3600
 PROGRESS_MAX_ENTRIES = 2000
 
+
 def _prune_progress():
     now = int(time.time())
     with PROGRESS_LOCK:
         if len(PROGRESS) > PROGRESS_MAX_ENTRIES:
             # drop oldest half
             items = sorted(PROGRESS.items(), key=lambda kv: kv[1].get("ts", 0))
-            for k, _ in items[: len(items)//2]:
+            for k, _ in items[: len(items) // 2]:
                 PROGRESS.pop(k, None)
         # TTL pass
         dead = [k for k, v in PROGRESS.items() if (now - int(v.get("ts", now))) > PROGRESS_TTL_SEC]
         for k in dead:
             PROGRESS.pop(k, None)
+
 
 # --- AI LaTeX repair ---
 
@@ -66,27 +72,28 @@ _TECTONIC_CMD = None
 
 # --- Stage 13: security & rate limits (env-togglable) ---
 BASIC_AUTH_ENABLED = os.getenv("APP_BASIC_AUTH", "0") in ("1", "true", "yes")
-BASIC_AUTH_USER    = os.getenv("APP_USER", "admin")
-BASIC_AUTH_PASS    = os.getenv("APP_PASS", "admin")
+BASIC_AUTH_USER = os.getenv("APP_USER", "admin")
+BASIC_AUTH_PASS = os.getenv("APP_PASS", "admin")
 
 # Per-IP limits (defaults are conservative; adjust in env if needed)
-RATE_UPLOADS_PER_MIN   = int(os.getenv("APP_RATE_UPLOADS_PER_MIN", "6"))   # POST /upload
-RATE_STATUS_PER_10S    = int(os.getenv("APP_RATE_STATUS_PER_10S", "50"))   # GET /status
-RATE_DOWNLOADS_PER_MIN = int(os.getenv("APP_RATE_DOWNLOADS_PER_MIN", "60"))# GET /download/*
+RATE_UPLOADS_PER_MIN = int(os.getenv("APP_RATE_UPLOADS_PER_MIN", "6"))  # POST /upload
+RATE_STATUS_PER_10S = int(os.getenv("APP_RATE_STATUS_PER_10S", "50"))  # GET /status
+RATE_DOWNLOADS_PER_MIN = int(os.getenv("APP_RATE_DOWNLOADS_PER_MIN", "60"))  # GET /download/*
 
 # Internal buckets
 _RL = {
-    "upload":   {},   # ip -> deque[timestamps]
-    "status":   {},
+    "upload": {},  # ip -> deque[timestamps]
+    "status": {},
     "download": {},
 }
 _RL_WINDOW = {
-    "upload":   60.0,
-    "status":   10.0,
+    "upload": 60.0,
+    "status": 10.0,
     "download": 60.0,
 }
 _RL_LOCK = Lock()
 UPLOAD_FS_LOCK = Lock()
+
 
 def env_int(name: str, default: int) -> int:
     try:
@@ -94,36 +101,39 @@ def env_int(name: str, default: int) -> int:
     except Exception:
         return default
 
+
 def env_float(name: str, default: float) -> float:
     try:
         return float(os.getenv(name, str(default)))
     except Exception:
         return default
 
+
 def env_str(name: str, default: str) -> str:
     return os.getenv(name, default)
 
+
 # Stage 14: env-overridable limits (defaults unchanged)
-MAX_FILES                = env_int("APP_MAX_FILES", 30)
-MAX_FILE_MB              = env_int("APP_MAX_FILE_MB", 25)
-TOTAL_UPLOAD_MB          = env_int("APP_TOTAL_UPLOAD_MB", 100)
+MAX_FILES = env_int("APP_MAX_FILES", 30)
+MAX_FILE_MB = env_int("APP_MAX_FILE_MB", 25)
+TOTAL_UPLOAD_MB = env_int("APP_TOTAL_UPLOAD_MB", 100)
 
-TXT_CHAR_LIMIT           = env_int("APP_TXT_CHAR_LIMIT", 1_000_000)
-RTF_CHAR_LIMIT           = env_int("APP_RTF_CHAR_LIMIT", 1_000_000)
-DOCX_PARA_LIMIT          = env_int("APP_DOCX_PARA_LIMIT", 50_000)
-PPTX_SLIDE_LIMIT         = env_int("APP_PPTX_SLIDE_LIMIT", 2_000)
-PDF_PAGE_LIMIT           = env_int("APP_PDF_PAGE_LIMIT", 2_000)
-TOTAL_TEXT_CHAR_CAP      = env_int("APP_TOTAL_TEXT_CHAR_CAP", 3_000_000)
+TXT_CHAR_LIMIT = env_int("APP_TXT_CHAR_LIMIT", 1_000_000)
+RTF_CHAR_LIMIT = env_int("APP_RTF_CHAR_LIMIT", 1_000_000)
+DOCX_PARA_LIMIT = env_int("APP_DOCX_PARA_LIMIT", 50_000)
+PPTX_SLIDE_LIMIT = env_int("APP_PPTX_SLIDE_LIMIT", 2_000)
+PDF_PAGE_LIMIT = env_int("APP_PDF_PAGE_LIMIT", 2_000)
+TOTAL_TEXT_CHAR_CAP = env_int("APP_TOTAL_TEXT_CHAR_CAP", 3_000_000)
 
-ZIP_UNCOMPRESSED_LIMIT_MB= env_int("APP_ZIP_UNCOMP_MB", 300)
-ZIP_COMPRESSION_RATIO_MAX= env_float("APP_ZIP_RATIO_MAX", 200.0)
+ZIP_UNCOMPRESSED_LIMIT_MB = env_int("APP_ZIP_UNCOMP_MB", 300)
+ZIP_COMPRESSION_RATIO_MAX = env_float("APP_ZIP_RATIO_MAX", 200.0)
 
-MAX_CONTENT_LENGTH       = TOTAL_UPLOAD_MB * 1024 * 1024  # Flask body cap (kept)
+MAX_CONTENT_LENGTH = TOTAL_UPLOAD_MB * 1024 * 1024  # Flask body cap (kept)
 # --- OCR settings ---
-ENABLE_OCR        = os.getenv("APP_ENABLE_OCR", "1").lower() in ("1","true","yes")
-OCR_DPI           = env_int("APP_OCR_DPI", 300)     # render DPI for OCR
-OCR_LANG          = env_str("APP_OCR_LANG", "eng")  # tesseract language(s), e.g. "eng+deu"
-OCR_PAGE_LIMIT    = env_int("APP_OCR_PAGE_LIMIT", PDF_PAGE_LIMIT)
+ENABLE_OCR = os.getenv("APP_ENABLE_OCR", "1").lower() in ("1", "true", "yes")
+OCR_DPI = env_int("APP_OCR_DPI", 300)  # render DPI for OCR
+OCR_LANG = env_str("APP_OCR_LANG", "eng")  # tesseract language(s), e.g. "eng+deu"
+OCR_PAGE_LIMIT = env_int("APP_OCR_PAGE_LIMIT", PDF_PAGE_LIMIT)
 # DEBUG: Check OCR availability
 print(f"DEBUG: ENABLE_OCR = {ENABLE_OCR}")
 print(f"DEBUG: pytesseract = {pytesseract}")
@@ -133,6 +143,7 @@ if pytesseract is not None:
         print(f"DEBUG: tesseract version = {pytesseract.get_tesseract_version()}")
     except Exception as e:
         print(f"DEBUG: tesseract error = {e}")
+
 
 def _detect_tectonic_cmd():
     global _TECTONIC_CMD
@@ -147,7 +158,7 @@ def _detect_tectonic_cmd():
     try:
         with _TEX_SEM:
             proc = subprocess.run(
-                ["tectonic","-X","compile","--outdir",td,tex_path],
+                ["tectonic", "-X", "compile", "--outdir", td, tex_path],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5
             )
         _TECTONIC_CMD = "new" if proc.returncode == 0 else "old"
@@ -219,10 +230,10 @@ ERR.update({
 
 ERR.update({
     "auth_required": "Authentication required.",
-    "auth_invalid":  "Invalid username or password.",
-    "rl_upload":     "Rate limit exceeded for uploads. Please wait a moment and try again.",
-    "rl_status":     "Too many status checks; please slow down.",
-    "rl_download":   "Rate limit exceeded for downloads. Please wait a moment and try again.",
+    "auth_invalid": "Invalid username or password.",
+    "rl_upload": "Rate limit exceeded for uploads. Please wait a moment and try again.",
+    "rl_status": "Too many status checks; please slow down.",
+    "rl_download": "Rate limit exceeded for downloads. Please wait a moment and try again.",
 })
 
 _HEADER_PREFIX_RE = re.compile(r"""(?ix)
@@ -241,6 +252,7 @@ _HEADER_PREFIX_RE = re.compile(r"""(?ix)
     \s*[:\-–—]*\s*
 """)
 
+
 def chunk_items_by_tokens(items: list[str], max_input_tokens: int) -> list[list[str]]:
     """Greedily pack numbered items into batches without exceeding max_input_tokens."""
     batches, cur, cur_tok = [], [], 0
@@ -248,10 +260,13 @@ def chunk_items_by_tokens(items: list[str], max_input_tokens: int) -> list[list[
         # cost for item content plus numbering/glue
         t = fast_token_estimate(it) + 6
         if cur and (cur_tok + t) > max_input_tokens:
-            batches.append(cur); cur, cur_tok = [], 0
-        cur.append(it); cur_tok += t
+            batches.append(cur);
+            cur, cur_tok = [], 0
+        cur.append(it);
+        cur_tok += t
     if cur: batches.append(cur)
     return batches
+
 
 def strip_category_header_prefix(item: str) -> str:
     m = _HEADER_PREFIX_RE.match(item)
@@ -262,15 +277,19 @@ def strip_category_header_prefix(item: str) -> str:
     prefix = (tail + ' ') if tail and not tail.endswith(' ') else tail
     return (prefix + rest).lstrip()
 
+
 def strip_headers_from_items(items: list[str]) -> list[str]:
     return [strip_category_header_prefix(it) for it in items]
+
 
 def normalize_numbering(s: str) -> str:
     s = re.sub(r'(?m)^\s*(\d+)[\)\-:]\s+', r'\1. ', s)
     s = re.sub(r'(?<!\n)\s+(\d+\.\s+)', r'\n\1', s)
     return s
 
+
 _SPLIT_RE = re.compile(r'(?m)^\s*\d+[\.\)]\s+')
+
 
 def split_numbered_items(s: str) -> list[str]:
     s = re.sub(r'(?m)^\s*(\d+)[\)\-:]\s+', r'\1. ', s)
@@ -278,10 +297,13 @@ def split_numbered_items(s: str) -> list[str]:
     items = [p.strip() for p in parts if p.strip()]
     return items
 
+
 def clamp_items(items: list[str], n: int) -> list[str]:
     return items[:n] if len(items) > n else items
 
+
 RISK_PATTERNS = [re.compile(p) for p in _AI_RISK_PATTERNS]
+
 
 def ai_fix_latex(text: str, client, model: str = "gpt-4o-mini", max_tokens: int = 2000) -> str:
     try:
@@ -301,6 +323,7 @@ def ai_fix_latex(text: str, client, model: str = "gpt-4o-mini", max_tokens: int 
     except Exception:
         return text
 
+
 def patch_left_right(text: str) -> str:
     def _balance(pair_open, pair_close, left_cmd=r'\\left', right_cmd=r'\\right'):
         opens = len(re.findall(left_cmd + r'\s*' + re.escape(pair_open), text))
@@ -309,10 +332,12 @@ def patch_left_right(text: str) -> str:
         if opens > closes:
             t += right_cmd + pair_close
         return t
+
     t = text
     for op, cl in [('(', ')'), ('[', ']'), ('\\{', '\\}')]:
         t = _balance(op, cl)
     return t
+
 
 LATEX_CHAR_MAP = {
     "⇌": r"$\rightleftharpoons$", "×": r"$\times$", "·": r"$\cdot$", "•": r"$\bullet$", "÷": r"$\div$",
@@ -366,47 +391,60 @@ SUBS = dict(zip("₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎", "0123456789+-=(
 
 # ----- math/no-math segmentation -----
 _MATH_SEGMENT_PATTERN = re.compile(
-    r'(\\\[(?:.|\n)+?\\\])'      # \[...\]
-    r'|(\\\((?:.|\n)+?\\\))'     # \(...\)
-    r'|(\$\$(?:.|\n)+?\$\$)'     # $$...$$
-    r'|(\$(?:.|\n)+?\$)',        # $...$
+    r'(\\\[(?:.|\n)+?\\\])'  # \[...\]
+    r'|(\\\((?:.|\n)+?\\\))'  # \(...\)
+    r'|(\$\$(?:.|\n)+?\$\$)'  # $$...$$
+    r'|(\$(?:.|\n)+?\$)',  # $...$
     re.MULTILINE
 )
 
+
 def _protect_math_segments(text: str):
     placeholders = []
+
     def repl(m):
         idx = len(placeholders)
         placeholders.append(m.group(0))
         return f"@@MATH{idx}@@"
+
     protected = _MATH_SEGMENT_PATTERN.sub(repl, text)
+
     def restore(s):
         for i, seg in enumerate(placeholders):
             s = s.replace(f"@@MATH{i}@@", seg)
         return s
+
     return protected, restore
+
 
 def _transform_inside_math(tex: str, fn_disp_and_inl):
     def repl_disp(m):
         inner = m.group(1)
         return r'\[' + fn_disp_and_inl(inner) + r'\]'
+
     def repl_inl(m):
         inner = m.group(1)
         return r'\(' + fn_disp_and_inl(inner) + r'\)'
+
     tex = re.sub(r'\\\[(.+?)\\\]', repl_disp, tex, flags=re.S)
     tex = re.sub(r'\\\((.+?)\\\)', repl_inl, tex, flags=re.S)
     return tex  # NOTE: do NOT call _sanitize_tex_math() here
+
 
 def _transform_inline_math_only(tex: str, fn_inl):
     def repl_inl(m):
         inner = m.group(1)
         return r'\(' + fn_inl(inner) + r'\)'
+
     return re.sub(r'\\\((.+?)\\\)', repl_inl, tex, flags=re.S)
+
+
 def _escape_percent_outside_math(text: str) -> str:
     r"""Replace literal % with \% outside math, leave math segments untouched."""
     protected, restore = _protect_math_segments(text)
     protected = protected.replace('%', r'\%')
     return restore(protected)
+
 
 def _wrap_exponents_outside_math(text: str) -> str:
     protected, restore = _protect_math_segments(text)
@@ -415,23 +453,41 @@ def _wrap_exponents_outside_math(text: str) -> str:
     protected = re.sub(r'\b([A-Za-z0-9])\s*\^\s*([A-Za-z])\b', r'$\1^{\2}$', protected)
     protected = re.sub(r'\b([A-Za-z0-9])\s*\^\s*([+-]?\d+)(?=\s*[A-Za-z])', r'$\1^{\2}$', protected)
     return restore(protected)
+def _fix_caret_paren_across_lines(text: str) -> str:
+    """
+    Outside math only: wrap patterns like 'e^  \n  (-x)' or 'k ^ (+2t)'
+    into $e^{(-x)}$, $k^{(+2t)}$ etc. Handles optional whitespace/newlines/signs.
+    """
+    protected, restore = _protect_math_segments(text)
+    # letter/number token, optional spaces/newlines, caret, optional spaces/newlines, '(', inner, ')'
+    # inner is conservative to avoid gobbling paragraphs
+    pat = re.compile(
+        r'(?P<base>\b[A-Za-z0-9])\s*\^\s*[\r\n\t ]*\(\s*(?P<inner>[^()]{1,120}?)\s*\)',
+        flags=re.MULTILINE
+    )
+    protected = pat.sub(lambda m: r'$\g<base>^{(\g<inner>)}$', protected)
+    return restore(protected)
 
 def _replace_super_sub_sequences(text: str) -> str:
     def sup_repl(m):
         mapped = "".join(SUPERS.get(ch, "") for ch in m.group(0))
         return f"$^{{{mapped}}}$" if mapped else m.group(0)
+
     def sub_repl(m):
         mapped = "".join(SUBS.get(ch, "") for ch in m.group(0))
         return f"$_{{{mapped}}}$" if mapped else m.group(0)
+
     text = re.sub(r"[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾]+", sup_repl, text)
     text = re.sub(r"[₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎]+", sub_repl, text)
     return text
+
 
 def _replace_sqrt(text: str) -> str:
     text = re.sub(r"√\s*\(([^)]+)\)", lambda m: r"$\sqrt{%s}$" % m.group(1), text)
     text = re.sub(r"√\s*([A-Za-z0-9]+)", lambda m: r"$\sqrt{%s}$" % m.group(1), text)
     text = re.sub(r"√(?=\s|$)", lambda m: r"$\sqrt{\quad}$", text)
     return text
+
 
 def _limits_op(text: str, symbol: str, latex_cmd: str) -> str:
     sym = re.escape(symbol)
@@ -444,6 +500,7 @@ def _limits_op(text: str, symbol: str, latex_cmd: str) -> str:
     pat4 = rf"{sym}\s*\^\s*([A-Za-z0-9+\-*/\\().]+)\s*_\s*([A-Za-z0-9+\-*/\\().]+)"
     text = re.sub(pat4, lambda m: f"${latex_cmd}_{{{m.group(2)}}}^{{{m.group(1)}}}$", text)
     pat5 = rf"{sym}([₀₁₂₃₄₅₆₇₈₉]+)([⁰¹²³⁴⁵⁶⁷⁸⁹]*)"
+
     def subscript_repl(m):
         sub_chars = m.group(1)
         sup_chars = m.group(2) if m.group(2) else ""
@@ -453,9 +510,11 @@ def _limits_op(text: str, symbol: str, latex_cmd: str) -> str:
             return f"${latex_cmd}_{{{sub_normal}}}^{{{sup_normal}}}$"
         else:
             return f"${latex_cmd}_{{{sub_normal}}}$"
+
     text = re.sub(pat5, subscript_repl, text)
     text = re.sub(rf"\b{re.escape(symbol)}\b", lambda m: f"${latex_cmd}$", text)
     return text
+
 
 # --- Stage 13: helpers ---
 
@@ -466,6 +525,7 @@ def _client_ip():
         return xff.split(",")[0].strip()
     return request.remote_addr or "0.0.0.0"
 
+
 def _auth_ok_for_request():
     """Return True if auth is disabled OR valid Basic creds supplied."""
     if not BASIC_AUTH_ENABLED:
@@ -475,12 +535,14 @@ def _auth_ok_for_request():
         return False
     return (auth.username == BASIC_AUTH_USER) and (auth.password == BASIC_AUTH_PASS)
 
+
 def _need_www_auth():
     return (
         "Authentication required",
         401,
         {"WWW-Authenticate": 'Basic realm="ExamApp"'}
     )
+
 
 def _rate_allow(bucket: str, ip: str, max_count: int) -> bool:
     """Simple sliding-window counter with per-endpoint windows."""
@@ -495,6 +557,7 @@ def _rate_allow(bucket: str, ip: str, max_count: int) -> bool:
             return False
         dq.append(now)
         return True
+
 
 def get_difficulty_profile(difficulty: str):
     d = (difficulty or "medium").strip().lower()
@@ -516,7 +579,7 @@ def get_difficulty_profile(difficulty: str):
             "sum_style": "Concise, balanced detail.",
         },
         "hard": {
-            "q_temp": 0.95,      # push non-routine structures
+            "q_temp": 0.95,  # push non-routine structures
             "sum_temp": 0.40,
             "sum_token_scale": 1.15,
             "sum_words_each": 14,
@@ -595,10 +658,15 @@ def _sanitize_backslashes(tex: str) -> str:
     protected = re.sub(r'\\\\+', ' ', protected)
     return restore(protected)
 
+
 def _context_aware_math(text: str) -> str:
     protected, restore = _protect_math_segments(text)
-    protected = re.sub(r'\be\^([A-Za-z0-9\{\}]+)', r'$e^{\1}$', protected)
+    # e^(...)  →  $e^{(...)}$
+    protected = re.sub(r'\be\s*\^\s*\(\s*([^)]+?)\s*\)', r'$e^{(\1)}$', protected, flags=re.S)
+    # e^+x or e^-x → $e^{+x}$ / $e^{-x}$
+    protected = re.sub(r'\be\s*\^\s*([+\-]?[A-Za-z0-9])\b', r'$e^{\1}$', protected)
     return restore(protected)
+
 
 def convert_slashes_only_inside_math(tex: str) -> str:
     def _fracify(inner: str) -> str:
@@ -607,7 +675,9 @@ def convert_slashes_only_inside_math(tex: str) -> str:
             r'\\frac{\1}{\2}',
             inner
         )
+
     return _transform_inside_math(tex, _fracify)
+
 
 def latex_backup_translate(text: str) -> str:
     if not text:
@@ -615,6 +685,7 @@ def latex_backup_translate(text: str) -> str:
 
     # 1) Plain-text normalization + obvious symbol rewrites
     text = normalize_for_latex(text)
+    text = _fix_caret_paren_across_lines(text)
     text = _wrap_exponents_outside_math(text)
     text = _context_aware_math(text)
     for k, v in FRACTIONS.items(): text = text.replace(k, v)
@@ -635,20 +706,20 @@ def latex_backup_translate(text: str) -> str:
     text = _replace_super_sub_sequences(text)
     text = re.sub(r"°\s*C", lambda m: r"$^{\circ}$C", text)
     text = re.sub(r'\bdy/dx\b', lambda m: r'$\frac{dy}{dx}$', text)
-    text = re.sub(r'\bd/dx\b',  lambda m: r'$\frac{d}{dx}$', text)
+    text = re.sub(r'\bd/dx\b', lambda m: r'$\frac{d}{dx}$', text)
 
     # 4) *** New guards to prevent malformed fractions/units ***
-    text = _fix_text_macros_in_math(text)        # e.g. "\text dm" -> "\text{dm}"; balances \text inside \frac
-    text = _fix_frac_forms_in_math(text)         # e.g. "\frac a b" -> "\frac{a}{b}"
-    text = _fix_sqrt_args_in_math(text)          # e.g. "\sqrt x" -> "\sqrt{x}"
-    text = _fix_frac_sqrt_edgecases_in_math(text)# e.g. "\frac{\sqrt}{A}{B}" -> "\frac{\sqrt{A}}{B}"
-    text = _fix_veclike_args_in_math(text)       # e.g. "\vec x" -> "\vec{x}"
-    text = convert_slashes_only_inside_math(text)# "a/b" -> "\frac{a}{b}" inside math only
-    text = _fix_malformed_frac_text(text)        # <-- includes the specific \frac{\text}{kJ}{\text{mol}} fix
+    text = _fix_text_macros_in_math(text)  # e.g. "\text dm" -> "\text{dm}"; balances \text inside \frac
+    text = _fix_frac_forms_in_math(text)  # e.g. "\frac a b" -> "\frac{a}{b}"
+    text = _fix_sqrt_args_in_math(text)  # e.g. "\sqrt x" -> "\sqrt{x}"
+    text = _fix_frac_sqrt_edgecases_in_math(text)  # e.g. "\frac{\sqrt}{A}{B}" -> "\frac{\sqrt{A}}{B}"
+    text = _fix_veclike_args_in_math(text)  # e.g. "\vec x" -> "\vec{x}"
+    text = convert_slashes_only_inside_math(text)  # "a/b" -> "\frac{a}{b}" inside math only
+    text = _fix_malformed_frac_text(text)  # <-- includes the specific \frac{\text}{kJ}{\text{mol}} fix
 
     # 5) Final surface cleanup
-    text = _sanitize_backslashes(text)           # drop stray "\\" outside display math
-    text = _wrap_naked_math(text)                # wrap leftover macro fragments in \( ... \)
+    text = _sanitize_backslashes(text)  # drop stray "\\" outside display math
+    text = _wrap_naked_math(text)  # wrap leftover macro fragments in \( ... \)
 
     return text
 
@@ -671,8 +742,10 @@ _DOLLAR_MATH = re.compile(r'\$(.+?)\$', re.S)
 # --- Fix vector/hat/bar macros & malformed \frac, INSIDE MATH ONLY ---
 _VEC_LIKE = r'(?:vec|hat|bar|tilde|overline|underline|dot|ddot|breve|check|grave|acute)'
 
+
 def _fix_veclike_args_in_math(tex: str) -> str:
     r"""Ensure \vec x -> \vec{x}, \hat i -> \hat{i}, etc., and nest properly."""
+
     def fix(inner: str) -> str:
         # \vec x  -> \vec{x}  (and similar for other macros)
         inner = re.sub(rf'\\({_VEC_LIKE})\s*([A-Za-z])\b', r'\\\1{\2}', inner)
@@ -680,10 +753,13 @@ def _fix_veclike_args_in_math(tex: str) -> str:
         inner = re.sub(rf'\\({_VEC_LIKE})\s*\{{\s*\\({_VEC_LIKE})\s*([A-Za-z])\s*\}}',
                        r'\\\1{\\\2{\3}}', inner)
         return inner
+
     return _transform_inside_math(tex, fix)
+
 
 def _fix_frac_forms_in_math(tex: str) -> str:
     """Normalize various broken \frac forms to exactly two arguments."""
+
     def fix(inner: str) -> str:
         # 1) Whitespace form: \frac a b  -> \frac{a}{b}
         inner = re.sub(r'\\frac\s+([^\s{}]+)\s+([^\s{}]+)', r'\\frac{\1}{\2}', inner)
@@ -703,13 +779,17 @@ def _fix_frac_forms_in_math(tex: str) -> str:
         #    Heuristic: add a } if we see an opening { without a close before a delimiter.
         # (lightweight—your earlier fixers handle most cases)
         return inner
+
     return _transform_inside_math(tex, fix)
+
+
 def _fix_text_macros_in_math(tex: str) -> str:
     """
     Ensure \text has a braced argument inside math and repair the very common slips:
       - '\text dm'  -> '\text{dm}'
       - '\frac{\text}{X}' -> '\frac{\text{}}{X}'  (lets later fixers normalize \frac properly)
     """
+
     def fix(inner: str) -> str:
         # 1) \text dm  -> \text{dm}       (single or two-word tokens)
         inner = re.sub(r'\\text\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)', r'\\text{\1}', inner)
@@ -718,7 +798,10 @@ def _fix_text_macros_in_math(tex: str) -> str:
         inner = re.sub(r'\\frac\s*\{\s*\\text\s*\}\s*(\{)', r'\\frac{\\text{}}\\1', inner)
 
         return inner
+
     return _transform_inside_math(tex, fix)
+
+
 # Keep your _wrap_naked_math() from previous message.
 
 
@@ -746,12 +829,15 @@ def _wrap_naked_math(tex: str) -> str:
 
     return restore(protected)
 
+
 # =========================
 # Models
 # =========================
 # Stage 14: allow overriding models via env
 summary_model = env_str("OPENAI_MODEL_SUMMARY", "gpt-4o-mini")
-main_model    = env_str("OPENAI_MODEL_MAIN",    "gpt-4o-mini")
+main_model = env_str("OPENAI_MODEL_MAIN", "gpt-4o-mini")
+
+
 # Dedicated answers model for "question paper" mode (overridable via env)
 
 
@@ -772,6 +858,7 @@ def unicode_to_ascii(s):
     normalized = unicodedata.normalize("NFKD", s)
     return "".join(c for c in normalized if not unicodedata.combining(c))
 
+
 def normalize_for_latex(s: str) -> str:
     s = unicodedata.normalize("NFKD", s)
     s = "".join(ch for ch in s if not unicodedata.combining(ch))
@@ -785,17 +872,21 @@ def normalize_for_latex(s: str) -> str:
     s = unicode_to_ascii(s)
     return s
 
+
 # =========================
 # Latency models
 # =========================
 def t_4o_latest_seconds(n_in_tokens: int, n_out_tokens: int) -> float:
     return 0.6 + (n_in_tokens / 40_000) + (n_out_tokens / 80)
 
+
 def t_4o_mini_summary_seconds(raw_tokens_per_file: int, summary_tokens_per_file: int) -> float:
     return 0.5 + (raw_tokens_per_file / 60_000) + (summary_tokens_per_file / 100)
 
+
 def t_non_model_seconds(n_files: int, total_raw_tokens: int, total_questions: int) -> float:
     return 3.0 + 1.0 * n_files + 0.00008 * total_raw_tokens + 0.45 * total_questions
+
 
 # =========================
 # Q/A token estimators
@@ -804,26 +895,29 @@ def estimate_tokens_main_questions(n_long: int, n_short: int, n_mcq: int, n_math
     BASE, TOK_LONG, TOK_SHORT, TOK_MCQ, TOK_MATH = 20, 180, 80, 120, 240
     return int(BASE + TOK_LONG * n_long + TOK_SHORT * n_short + TOK_MCQ * n_mcq + TOK_MATH * n_math)
 
+
 def estimate_tokens_main_answers(n_long: int, n_short: int, n_mcq: int, n_math: int) -> int:
     BASE, TOK_LONG, TOK_SHORT, TOK_MCQ, TOK_MATH = 15, 150, 50, 20, 220
     return int(BASE + TOK_LONG * n_long + TOK_SHORT * n_short + TOK_MCQ * n_mcq + TOK_MATH * n_math)
 
+
 # =========================
 # Summarization planning
 # =========================
-RECOMMENDED_SUMMARY_TOKENS   = env_int("APP_SUMMARY_TOKENS", 700)   # was 350
-SUMMARY_TOKENS_HARD_MIN      = env_int("APP_SUMMARY_MIN", 400)      # was 200
-SUMMARY_TOKENS_HARD_MAX      = env_int("APP_SUMMARY_MAX", 1600)     # was 800
+RECOMMENDED_SUMMARY_TOKENS = env_int("APP_SUMMARY_TOKENS", 700)  # was 350
+SUMMARY_TOKENS_HARD_MIN = env_int("APP_SUMMARY_MIN", 400)  # was 200
+SUMMARY_TOKENS_HARD_MAX = env_int("APP_SUMMARY_MAX", 1600)  # was 800
 
 ALWAYS_SAFE_MAIN_Q_INPUT_CAP = env_int("APP_Q_INPUT_CAP", 12_000)
-TARGET_MAX_N_OUT_Q           = env_int("APP_Q_OUT_CAP",   4_000)
-TARGET_MAX_N_OUT_A           = env_int("APP_A_OUT_CAP",   2_500)
+TARGET_MAX_N_OUT_Q = env_int("APP_Q_OUT_CAP", 4_000)
+TARGET_MAX_N_OUT_A = env_int("APP_A_OUT_CAP", 2_500)
 SUM_MIN_K = env_int("APP_SUM_MIN_K", 2)
 SUM_MAX_K = env_int("APP_SUM_MAX_K", 4)
 
 TARGET_MID = 42.0  # More aggressive target
 LOWER = 40.0
 UPPER = 50.0
+
 
 def estimate_compile_seconds() -> float:
     # Empirical, conservative for two Tectonic runs in parallel
@@ -832,7 +926,7 @@ def estimate_compile_seconds() -> float:
 
 def _emergency_tex_sanitize(tex: str) -> str:
     """Emergency fixes for the most common LaTeX compilation failures."""
-
+    tex = _fix_caret_paren_across_lines(tex)
     # EMERGENCY FIX 1: Most common malformed fraction pattern
     tex = re.sub(
         r'\\frac\s*\{\s*\\text\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*\\text\s*\{\s*([^{}]+)\s*\}\s*\}',
@@ -867,18 +961,19 @@ def _emergency_tex_sanitize(tex: str) -> str:
 
     return _sanitize_tex_math(tex)
 
+
 def plan_summarization_sla(
-    timings_so_far: dict,
-    n_files: int,
-    raw_avg_tokens: int,
-    n_out_q_cap: int,
-    n_out_a_cap: int,
+        timings_so_far: dict,
+        n_files: int,
+        raw_avg_tokens: int,
+        n_out_q_cap: int,
+        n_out_a_cap: int,
         min_k: int = SUM_MIN_K,  # was 4
-        max_k: int = SUM_MAX_K,   # Increased from 6 for better scaling
-    hard_min: int = 150,  # Reduced from 200
-    hard_max: int = 1200  # Increased from 800 for longer summaries when needed
+        max_k: int = SUM_MAX_K,  # Increased from 6 for better scaling
+        hard_min: int = 150,  # Reduced from 200
+        hard_max: int = 1200  # Increased from 800 for longer summaries when needed
 ):
-    T_nonmodel = sum(timings_so_far.get(k, 0.0) for k in ("ingest_write","preprocess","token_count"))
+    T_nonmodel = sum(timings_so_far.get(k, 0.0) for k in ("ingest_write", "preprocess", "token_count"))
     T_QA_pred = t_4o_latest_seconds(n_in_tokens=n_out_q_cap, n_out_tokens=n_out_a_cap)
     T_compile = estimate_compile_seconds()
 
@@ -905,8 +1000,10 @@ def break_even_raw_avg_tokens_per_file(n_files: int, K_parallel: int, S_summary_
     denominator = max(1e-9, (1.0 - alpha))
     return numerator / denominator
 
+
 def break_even_raw_avg_tokens_per_file_simple(S_summary_tokens_per_file: int) -> float:
     return 6_000.0 + 121.0 * S_summary_tokens_per_file
+
 
 def summary_tokens_cap_per_file(T_sum_budget_s: float, n_files: int, K_parallel: int,
                                 raw_avg_tokens_per_file: int,
@@ -917,6 +1014,7 @@ def summary_tokens_cap_per_file(T_sum_budget_s: float, n_files: int, K_parallel:
     C = math.ceil(n_files / K_parallel)
     s_max = 100.0 * (T_sum_budget_s / C - 0.5 - raw_avg_tokens_per_file / 60_000.0)
     return int(max(hard_min, min(hard_max, math.floor(s_max))))
+
 
 def choose_summary_parallelism(n_files, raw_avg_tokens_per_file, S_summary_tokens_per_file,
                                T_sum_budget_s, min_k: int = 2, max_k: int = 8) -> int:
@@ -961,16 +1059,20 @@ def enhance_math_content_for_questions(text_for_main: str, num_math: int, total_
 
 def _fix_sqrt_args_in_math(tex: str) -> str:
     """Ensure \\sqrt has a braced argument inside math."""
+
     def fix(inner: str) -> str:
         # \sqrt x -> \sqrt{x}
         inner = re.sub(r'\\sqrt\s+([A-Za-z0-9+\-*/().])', r'\\sqrt{\1}', inner)
         # Bare \sqrt (no following { or token) -> \sqrt{}
         inner = re.sub(r'\\sqrt(?!\s*\{)', r'\\sqrt{}', inner)
         return inner
+
     return _transform_inside_math(tex, fix)
+
 
 def _fix_frac_sqrt_edgecases_in_math(tex: str) -> str:
     r"""Repair \frac{\sqrt}{A}{B} and \frac{\sqrt}{A} edge cases inside math."""
+
     def fix(inner: str) -> str:
         # \frac{\sqrt}{A}{B} -> \frac{\sqrt{A}}{B}
         inner = re.sub(
@@ -983,7 +1085,9 @@ def _fix_frac_sqrt_edgecases_in_math(tex: str) -> str:
             r'\\sqrt{\1}', inner
         )
         return inner
+
     return _transform_inside_math(tex, fix)
+
 
 # --- Stage 10: downloads metadata -
 
@@ -993,6 +1097,7 @@ def _read_run_meta() -> dict | None:
             return json.load(f)
     except Exception:
         return None
+
 
 def get_quality_answer_instruction():
     return """Create a comprehensive mark scheme for this question paper.
@@ -1013,9 +1118,11 @@ Format:
 Focus on accuracy and completeness over brevity.
 """
 
+
 def fast_token_estimate(text: str) -> int:
     """Faster token estimation using character count heuristic"""
     return len(text) // 3.8  # More accurate ratio for mixed content
+
 
 def max_input_tokens_for_main_questions(
         n_files: int,
@@ -1042,6 +1149,7 @@ def max_input_tokens_for_main_questions(
     N_in_Q_max = 40_000.0 * (T_left_for_Q - 0.6 - (n_out_q_tokens / 80.0))
     return int(max(0, math.floor(N_in_Q_max)))
 
+
 # --- Stage 9: progress helpers ---
 def fail_progress(job: str, *, pct: int = 97, step: int | None = 5,
                   label: str = "An error occurred", http_status: int = 500, msg: str = "Internal error"):
@@ -1053,6 +1161,7 @@ def fail_progress(job: str, *, pct: int = 97, step: int | None = 5,
         set_progress(job, pct, step=step, label=label, status="done")
     finally:
         return msg, http_status
+
 
 # --- Stage 7: blueprint-driven mark scheme helpers ---
 
@@ -1071,6 +1180,7 @@ def _per_item_answer_spec_lines(blueprint: list[dict], start_idx: int = 1, end_i
         out.append(f"Item {i}: " + "; ".join(parts))
     return "\n".join(out)
 
+
 def get_quality_answer_instruction_from_blueprint(blueprint: list[dict]) -> str:
     """Wrap your existing answer instruction with a strict 1..N alignment note + per-item refs."""
     N = len(blueprint)
@@ -1083,12 +1193,13 @@ def get_quality_answer_instruction_from_blueprint(blueprint: list[dict]) -> str:
         f"\nPer-item reference:\n{_per_item_answer_spec_lines(blueprint)}\n"
     )
 
+
 def continue_mark_scheme_from_blueprint(
-    prev_text: str,
-    start_idx: int,
-    end_idx: int,
-    questions_text: str,
-    blueprint: list[dict],
+        prev_text: str,
+        start_idx: int,
+        end_idx: int,
+        questions_text: str,
+        blueprint: list[dict],
 ) -> str:
     """Continuation prompt that preserves numbering and uses the per-item plan."""
     subplan = _per_item_answer_spec_lines(blueprint, start_idx, end_idx)
@@ -1111,6 +1222,7 @@ Previous mark scheme items:
 {prev_text}
 """
 
+
 # =========================
 # App + OpenAI
 # =========================
@@ -1121,18 +1233,21 @@ PROGRESS_LOCK = Lock()
 CANCELED_JOBS = set()
 CANCELED_LOCK = Lock()
 
+
 def is_canceled(job: str) -> bool:
     with CANCELED_LOCK:
         return job in CANCELED_JOBS
 
+
 META_PATH = os.path.join(OUTPUT_DIR, "_meta.json")
+
 
 def _write_run_meta(mode: str, title: str, available: list[str], extra: dict | None = None):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     meta = {
-        "mode": mode,                       # "exam"
+        "mode": mode,  # "exam"
         "title": (title or "").strip(),
-        "available": sorted(set(available)),# e.g. ["answers"] or ["questions","answers"]
+        "available": sorted(set(available)),  # e.g. ["answers"] or ["questions","answers"]
         "timestamp": int(__import__("time").time())
     }
     if extra:
@@ -1142,6 +1257,7 @@ def _write_run_meta(mode: str, title: str, available: list[str], extra: dict | N
             json.dump(meta, f, ensure_ascii=False, indent=2)
     except Exception:
         pass  # non-fatal
+
 
 def set_progress(job: str, pct: int, step: int | None = None, label: str | None = None, status: str = "running"):
     """Monotonic %; safe to call many times."""
@@ -1163,14 +1279,14 @@ if not OPENAI_API_KEY:
     raise RuntimeError("OPENAI_API_KEY not set. Export it in the environment.")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "").strip() or None
 client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL) if OPENAI_BASE_URL \
-         else OpenAI(api_key=OPENAI_API_KEY)
-
+    else OpenAI(api_key=OPENAI_API_KEY)
 
 ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx", ".pptx", ".rtf"}
 VALID_MODES = {"exam"}
 DIFF_ALLOWED = {"easy", "medium", "hard"}
 # --- Stage 3: qcount → blueprint helpers ---
 Q_TYPES = ("Long", "Short", "MCQ", "Math")
+
 
 def build_default_blueprint(qcount: int) -> list[dict]:
     """
@@ -1182,6 +1298,7 @@ def build_default_blueprint(qcount: int) -> list[dict]:
     for i in range(max(0, int(qcount))):
         bp.append({"index": i + 1, "type": order[i % len(order)]})
     return bp
+
 
 def blueprint_from_legacy_counts(num_long: int, num_short: int, num_mcq: int, num_math: int) -> list[dict]:
     """
@@ -1195,6 +1312,7 @@ def blueprint_from_legacy_counts(num_long: int, num_short: int, num_mcq: int, nu
             idx += 1
     return bp
 
+
 def counts_from_blueprint(bp: list[dict]) -> dict:
     counts = {"Long": 0, "Short": 0, "MCQ": 0, "Math": 0}
     for it in bp:
@@ -1202,6 +1320,7 @@ def counts_from_blueprint(bp: list[dict]) -> dict:
         if t in counts:
             counts[t] += 1
     return counts
+
 # --- NEW: simple math-content detector ---
 _MATH_LATEX_PATS = [
     r'(?<!\\)\$[^$]+\$', r'\\\([^)]*\\\)', r'\\\[[^\]]*\\\]',
@@ -1241,7 +1360,57 @@ def looks_mathematical_docs(docs: list[str]) -> bool:
     density = (nums + ops) / words
 
     return has_delims or hits >= 30 or (hits >= 10 and density >= 0.08) or density >= 0.14
+def math_content_signals(docs: list[str]) -> dict:
+    """
+    Returns simple signals + a conservative score in [0,1] for how 'mathy' the docs are.
+    Score blends token hits, operator/number density, and presence of LaTeX delimiters.
+    """
+    if not docs:
+        return {"hits": 0, "density": 0.0, "has_delims": False, "score": 0.0}
+    text = ("\n".join(docs))[:200_000]
 
+    # Reuse the compiled regexes defined above
+    hits = 0
+    for rx in _math_regexes:
+        try:
+            hits += len(rx.findall(text))
+        except Exception:
+            pass
+
+    has_delims = sum(len(re.findall(p, text, flags=re.S | re.I)) for p in _MATH_LATEX_PATS) >= 2
+
+    words = max(1, len(re.findall(r"\w+", text)))
+    nums  = len(re.findall(r"\b\d+(?:\.\d+)?\b", text))
+    ops   = len(re.findall(r"[+\-*/^=]", text))
+    density = (nums + ops) / words  # operators+numbers per word
+
+    # Normalize into a conservative 0..1 score
+    h = min(1.0, hits / 60.0)      # ~60 hits feels "very mathy"
+    d = min(1.0, density / 0.25)   # 0.25 is extremely dense
+    score = 0.55 * h + 0.35 * d + (0.10 if has_delims else 0.0)
+
+    return {"hits": hits, "density": density, "has_delims": has_delims, "score": score}
+
+
+def _pick_math_slots(blueprint: list[dict], target_k: int) -> list[int]:
+    """
+    Choose which items to set to Math:
+    - keep existing Math first;
+    - then convert evenly spaced non-Math items until we reach target_k.
+    """
+    N = len(blueprint)
+    idx_math = [i for i, it in enumerate(blueprint) if (it.get("type") or "").lower() == "math"]
+    need = max(0, target_k - len(idx_math))
+    if need == 0:
+        return idx_math[:target_k]
+
+    idx_non = [i for i, it in enumerate(blueprint) if (it.get("type") or "").lower() != "math"]
+    if not idx_non:
+        return idx_math
+
+    step = max(1, len(idx_non) // need)
+    chosen = [idx_non[i] for i in range(0, len(idx_non), step)][:need]
+    return sorted(set(idx_math + chosen))[:target_k]
 # --- Stage 5: token cap estimation from blueprint ---
 def estimate_output_token_caps_from_bp(blueprint: list[dict]) -> tuple[int, int]:
     """
@@ -1255,11 +1424,13 @@ def estimate_output_token_caps_from_bp(blueprint: list[dict]) -> tuple[int, int]
     n_out_a_cap = max(TARGET_MAX_N_OUT_A, int(n_out_a_est * 1.4))
     return n_out_q_cap, n_out_a_cap
 
+
 # --- Stage 6: blueprint-driven question prompt helpers ---
 
 def _bp_counts(blueprint: list[dict]) -> dict:
     # light wrapper (readability)
     return counts_from_blueprint(blueprint)
+
 
 def _difficulty_profile_for_prompt(global_diff: str | None):
     d = (global_diff or "medium").strip().lower()
@@ -1270,31 +1441,32 @@ def _difficulty_profile_for_prompt(global_diff: str | None):
     SHORT_RANGE = {"easy": "6-10", "medium": "10-18", "hard": "14-24"}
 
     diff_line_map = {
-        "easy":   "Ensure questions are easy, accessible and cover core topics; prioritize clarity over trickiness.",
+        "easy": "Ensure questions are easy, accessible and cover core topics; prioritize clarity over trickiness.",
         "medium": "Ensure questions require multi-step problem solving, conceptual understanding, and application of principles in unfamiliar contexts.",
-        "hard":   "Ensure questions are non-routine, multi-step, and integrate ideas; still solvable with standard methods for the intended level.",
+        "hard": "Ensure questions are non-routine, multi-step, and integrate ideas; still solvable with standard methods for the intended level.",
     }
     diff_guidance_map = {
         "easy": (
-            "- Single-idea prompts; no contrived contexts, no asking student to explain or discuss concepts.\n"
-            "- Avoid multi-step; keep MCQ distractors simple\n"
-            "- Prioritize very simple, short questions, can involve MCQ/Math; avoid long questions unless explicitly requested in Advanced.\n"
-            + _math_difficulty_rubric("easy")
+                "- Single-idea prompts; no contrived contexts, no asking student to explain or discuss concepts.\n"
+                "- Avoid multi-step; keep MCQ distractors simple\n"
+                "- Prioritize very simple, short questions, can involve MCQ/Math; avoid long questions unless explicitly requested in Advanced.\n"
+                + _math_difficulty_rubric("easy")
         ),
         "medium": (
-    "- Require 3-4 step problem solving with conceptual links between ideas\n"
-    "- Include unfamiliar scenarios requiring application of learned principles\n"
-    "- For MCQ: use sophisticated distractors based on common error patterns and partial understanding\n"
-    "- Demand explanation, analysis, or evaluation rather than simple recall\n"
-    + _math_difficulty_rubric("medium")
-),
+                "- Require 3-4 step problem solving with conceptual links between ideas\n"
+                "- Include unfamiliar scenarios requiring application of learned principles\n"
+                "- For MCQ: use sophisticated distractors based on common error patterns and partial understanding\n"
+                "- Demand explanation, analysis, or evaluation rather than simple recall\n"
+                + _math_difficulty_rubric("medium")
+        ),
         "hard": (
-    "- Prefer scenario-based or proof/‘show that’ items with dependencies between parts\n"
-    "- Do NOT use MCQ for hard items **unless** explicitly requested (Type=MCQ + Difficulty=hard in Advanced); otherwise use Long, Short or Math with multi-step reasoning\n"
-    + _math_difficulty_rubric("hard")
-),
+                "- Prefer scenario-based or proof/‘show that’ items with dependencies between parts\n"
+                "- Do NOT use MCQ for hard items **unless** explicitly requested (Type=MCQ + Difficulty=hard in Advanced); otherwise use Long, Short or Math with multi-step reasoning\n"
+                + _math_difficulty_rubric("hard")
+        ),
     }
     return d, LONG_RANGE[d], SHORT_RANGE[d], diff_line_map[d], diff_guidance_map[d]
+
 
 def _math_difficulty_rubric(level: str) -> str:
     lvl = (level or "medium").strip().lower()
@@ -1317,6 +1489,7 @@ def _math_difficulty_rubric(level: str) -> str:
         "use non-obvious numbers requiring careful manipulation.\n"
     )
 
+
 # Triviality patterns across domains
 _GENERIC_EASY_PATTERNS = [
     r"\bdefine\b",
@@ -1333,6 +1506,7 @@ _MATH_TOO_EASY = [
     r"\bsolve\b\s+(?:a\s+)?linear\b",
     r"\bsolve\b\s+(?:a\s+)?quadratic\b(?!.*(discriminant|parameter|hence|show that))",
 ]
+
 
 def _looks_trivial(item: str, qtype: str) -> bool:
     t = (qtype or "").lower()
@@ -1352,12 +1526,15 @@ def _looks_trivial(item: str, qtype: str) -> bool:
         for pat in _MATH_TOO_EASY:
             if re.search(pat, text):
                 return True
-        if "integrate" in text and not any(x in text for x in ["by parts", "substitution", "partial fraction", "limits", "parametric", "implicit"]):
+        if "integrate" in text and not any(x in text for x in
+                                           ["by parts", "substitution", "partial fraction", "limits", "parametric",
+                                            "implicit"]):
             return True
 
     # If super short and no parts, likely trivial
     few_tokens = len(re.findall(r"\w+", text)) < 25
     return soft_no_parts and few_tokens
+
 
 def _rewrite_hard_item(item: str, qtype: str, model: str, max_tokens: int) -> str:
     # Generic, neutral hardening prompt
@@ -1376,7 +1553,8 @@ def _rewrite_hard_item(item: str, qtype: str, model: str, max_tokens: int) -> st
             "- For Math: prefer exact forms when sensible; include non-trivial constants where appropriate; "
             "use legitimate methods rather than routine one-step tasks.\n"
         )
-    return get_response(instr, item, model=model, max_tokens=min(800, int(max_tokens*0.35)), temperature=0.9)
+    return get_response(instr, item, model=model, max_tokens=min(800, int(max_tokens * 0.35)), temperature=0.9)
+
 
 def enforce_hard_items(q_items: list[str], blueprint: list[dict], global_diff: str | None,
                        model: str, n_out_q_cap: int, max_regens: int = 2) -> list[str]:
@@ -1398,6 +1576,7 @@ def enforce_hard_items(q_items: list[str], blueprint: list[dict], global_diff: s
             pass
     return out
 
+
 _HARD_EASY_PATTERNS = [
     r"\bintegrat(e|ion)\b\s+(?:a\s+)?polynomial\b",
     r"\bdifferentiat(e|ion)\b\s+(?:a\s+)?single (?:term|monomial)\b",
@@ -1406,6 +1585,7 @@ _HARD_EASY_PATTERNS = [
     r"\bplug[- ]?in\b",
     r"\bsubstitute (?:numbers|values)\b\s*(?:to get|and get)\b",
 ]
+
 
 def _is_trivially_easy_math(item: str) -> bool:
     text = item.lower()
@@ -1416,14 +1596,17 @@ def _is_trivially_easy_math(item: str) -> bool:
         if re.search(pat, text):
             return True
     # also flag if there's calculus with no sign of methods beyond trivial
-    if "integrate" in text and not any(x in text for x in ["by parts", "substitution", "partial fraction", "limits", "parametric", "implicit"]):
+    if "integrate" in text and not any(
+            x in text for x in ["by parts", "substitution", "partial fraction", "limits", "parametric", "implicit"]):
         return True
     return False
+
 
 def _needs_upgrade(item: str, bp_item: dict, global_diff: str | None) -> bool:
     t = (bp_item.get("type") or "").lower()
     d = (bp_item.get("difficulty") or global_diff or "medium").lower()
     return t == "math" and d == "hard" and _is_trivially_easy_math(item)
+
 
 def _rewrite_hard_math(item: str, model: str, max_tokens: int) -> str:
     instr = (
@@ -1439,7 +1622,8 @@ def _rewrite_hard_math(item: str, model: str, max_tokens: int) -> str:
         "- Style exactly like Edexcel A-level questions; no answers.\n\n"
         "Rewrite now:\n"
     )
-    return get_response(instr, item, model=model, max_tokens=min(800, int(max_tokens*0.35)), temperature=0.9)
+    return get_response(instr, item, model=model, max_tokens=min(800, int(max_tokens * 0.35)), temperature=0.9)
+
 
 def enforce_hard_math(q_items: list[str], blueprint: list[dict], global_diff: str | None,
                       model: str, n_out_q_cap: int, max_regens: int = 2) -> list[str]:
@@ -1458,6 +1642,7 @@ def enforce_hard_math(q_items: list[str], blueprint: list[dict], global_diff: st
             pass
     return out
 
+
 def _per_item_spec_lines(blueprint: list[dict], start_idx: int = 1, end_idx: int | None = None) -> str:
     """
     Create a concise per-item plan: 'Item i — Type: X; [Difficulty: y]; [Additional instructions: z]'.
@@ -1466,8 +1651,8 @@ def _per_item_spec_lines(blueprint: list[dict], start_idx: int = 1, end_idx: int
         end_idx = len(blueprint)
     out = []
     for i in range(start_idx, end_idx + 1):
-        it = blueprint[i-1]
-        parts = [f"Type: {it.get('type','Long')}"]
+        it = blueprint[i - 1]
+        parts = [f"Type: {it.get('type', 'Long')}"]
         if it.get("difficulty"):
             parts.append(f"Difficulty: {it['difficulty']}")
         if it.get("topic"):
@@ -1475,9 +1660,10 @@ def _per_item_spec_lines(blueprint: list[dict], start_idx: int = 1, end_idx: int
         out.append(f"Item {i}: " + "; ".join(parts))
     return "\n".join(out)
 
+
 def get_quality_question_instruction_from_blueprint(
-    blueprint: list[dict],
-    global_difficulty: str | None
+        blueprint: list[dict],
+        global_difficulty: str | None
 ) -> str:
     """
     Build the full instruction string using the blueprint order and optional per-item
@@ -1545,13 +1731,14 @@ YOU MUST NOT INCLUDE ANSWERS TO THE QUESTIONS YOU WRITE
 Material:
 """
 
+
 def continue_numbered_list_from_blueprint(
-    prev_text: str,
-    start_idx: int,
-    end_idx: int,
-    material: str,
-    blueprint: list[dict],
-    global_difficulty: str | None,
+        prev_text: str,
+        start_idx: int,
+        end_idx: int,
+        material: str,
+        blueprint: list[dict],
+        global_difficulty: str | None,
 ) -> str:
     """
     Continuation instruction for missing items using the same per-item plan.
@@ -1577,6 +1764,7 @@ Material:
 {material}
 """
 
+
 # --- Stage 4: per-question overrides helpers ---
 MAX_TOPIC_LEN = 200
 QTYPE_NORMALIZE = {
@@ -1588,17 +1776,21 @@ QTYPE_NORMALIZE = {
     "calculation": "Math",
 }
 
+
 def _norm_type(v: str) -> str | None:
     if not v:
         return None
     key = str(v).strip().lower()
     return QTYPE_NORMALIZE.get(key)
 
+
 def _norm_diff(v: str) -> str | None:
     if not v:
         return None
     key = str(v).strip().lower()
     return key if key in DIFF_ALLOWED else None
+
+
 def enforce_no_hard_mcq(blueprint: list[dict], global_diff: str | None) -> list[dict]:
     """
     Default: block hard MCQ by converting to Short.
@@ -1620,6 +1812,8 @@ def enforce_no_hard_mcq(blueprint: list[dict], global_diff: str | None) -> list[
             it["type"] = "Short"  # auto-demote
             it.setdefault("_notes", []).append("auto-demoted-from-hard-MCQ")
     return blueprint
+
+
 def apply_easy_bias(blueprint: list[dict], global_diff: str | None) -> list[dict]:
     """
     For effective 'easy' items: avoid Long unless the user explicitly set BOTH
@@ -1642,6 +1836,7 @@ def apply_easy_bias(blueprint: list[dict], global_diff: str | None) -> list[dict
             it.setdefault("_notes", []).append("easy-bias-demote-long")
     return blueprint
 
+
 def _sanitize_tex_math(src: str) -> str:
     r"""
     Minimal, ordered fixes only. One pass. No fancy rules.
@@ -1654,6 +1849,7 @@ def _sanitize_tex_math(src: str) -> str:
     def _strip_dollars_inside(m: re.Match) -> str:
         inner = m.group(1).replace('$', '')
         return r"\(" + inner + r"\)"
+
     src = re.sub(r"\\\((.*?)\\\)", _strip_dollars_inside, src, flags=re.DOTALL)
 
     # 2) Convert bare $...$ to \( ... \)
@@ -1707,6 +1903,7 @@ def _sanitize_tex_math(src: str) -> str:
     src = _transform_inside_math(src, _fix)
     return src
 
+
 # --- END: TeX math sanitizer ---
 
 def _parse_seq_field(raw: str | None) -> list[str] | None:
@@ -1729,19 +1926,24 @@ def _parse_seq_field(raw: str | None) -> list[str] | None:
     # Fallback: CSV
     return [t.strip() for t in s.split(",")]
 
+
 def parse_int(x, default=0):
     try:
         return int(str(x).strip())
     except Exception:
         return default
+
+
 red_flags = ['Multiple Choice', 'Choice', 'Short', 'Long', 'Math/Calculation', 'Calculation', 'Math',
              'MCQ', 'Question', 'Answer', 'Mark Scheme']
+
 
 def latex_escape(s: str) -> str:
     return (s or "").replace("\\", r"\textbackslash{}") \
         .replace("&", r"\&").replace("%", r"\%").replace("$", r"\$") \
         .replace("#", r"\#").replace("_", r"\_").replace("{", r"\{") \
         .replace("}", r"\}").replace("~", r"\~{}").replace("^", r"\^{}")
+
 
 PREAMBLE = r"""
 \documentclass[12pt]{article}
@@ -1755,6 +1957,7 @@ PREAMBLE = r"""
 
 POSTAMBLE = r"\end{document}"
 
+
 def tex_from_items(items: list[str], title: str) -> str:
     header = r"\paperheader{" + latex_escape(title) + "}\n"
     body = "\\begin{flushleft}\\begin{enumerate}\n" + \
@@ -1762,8 +1965,10 @@ def tex_from_items(items: list[str], title: str) -> str:
            "\\end{enumerate}\\end{flushleft}\n"
     return PREAMBLE + header + body + POSTAMBLE
 
+
 # --- Stage 8: qpaper helpers (extract items, make a blueprint, render numbered text) ---
 TECTONIC_TIMEOUT = env_int("TECTONIC_TIMEOUT", 45)
+
 
 def compile_tex_with_tectonic(tex_source: str, *, timeout: int | None = None) -> bytes:
     timeout = TECTONIC_TIMEOUT if timeout is None else timeout
@@ -1797,18 +2002,21 @@ def compile_tex_with_tectonic(tex_source: str, *, timeout: int | None = None) ->
             )
         with open(pdf_path, "rb") as f:
             return f.read()
+
+
 # -- LaTeX sanitizer: fix common broken unit fractions like \frac{\text{mol}{dm}^3}
 _BAD_UNIT_FRACS = {
     r'\frac{\text{mol}{dm}^3}': r'\mathrm{mol\,dm^{-3}}',
-    r'\frac{\text{g}{cm}^3}':   r'\mathrm{g\,cm^{-3}}',
-    r'\frac{\text{kg}{m}^3}':   r'\mathrm{kg\,m^{-3}}',
+    r'\frac{\text{g}{cm}^3}': r'\mathrm{g\,cm^{-3}}',
+    r'\frac{\text{kg}{m}^3}': r'\mathrm{kg\,m^{-3}}',
 }
 # also fix the same pattern when not inside \frac{...}
 _BAD_UNIT_INLINE = {
     r'\text{mol}{dm}^3': r'\mathrm{mol\,dm^{-3}}',
-    r'\text{g}{cm}^3':   r'\mathrm{g\,cm^{-3}}',
-    r'\text{kg}{m}^3':   r'\mathrm{kg\,m^{-3}}',
+    r'\text{g}{cm}^3': r'\mathrm{g\,cm^{-3}}',
+    r'\text{kg}{m}^3': r'\mathrm{kg\,m^{-3}}',
 }
+
 
 def fix_bad_unit_fracs(tex: str) -> str:
     for k, v in _BAD_UNIT_FRACS.items():
@@ -1816,6 +2024,7 @@ def fix_bad_unit_fracs(tex: str) -> str:
     for k, v in _BAD_UNIT_INLINE.items():
         tex = tex.replace(k, v)
     return tex
+
 
 # near compile_tex_with_tectonic
 def compile_tex_with_tectonic_to_path(tex_source: str, out_path: str, *, timeout: int | None = None) -> None:
@@ -1828,7 +2037,7 @@ def compile_tex_with_tectonic_to_path(tex_source: str, out_path: str, *, timeout
         with open(tex_path, "w", encoding="utf-8") as f:
             f.write(tex_source)
         mode = _detect_tectonic_cmd()
-        cmd = (["tectonic","-X","compile","--outdir",td,"--keep-logs",tex_path]
+        cmd = (["tectonic", "-X", "compile", "--outdir", td, "--keep-logs", tex_path]
                if mode == "new" else
                ["tectonic", tex_path, "--keep-logs"])
         with _TEX_SEM:
@@ -1845,14 +2054,20 @@ def compile_tex_with_tectonic_to_path(tex_source: str, out_path: str, *, timeout
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         shutil.move(pdf_src, out_path)
 
+
 def compile_or_repair_to_path(tex_source: str, out_path: str) -> None:
-    return compile_tex_with_tectonic_to_path(_sanitize_tex_math(tex_source), out_path)
+    safe = _escape_percent_outside_math(tex_source)
+    safe = latex_backup_translate(safe)
+    safe = _sanitize_tex_math(safe)
+    return compile_tex_with_tectonic_to_path(safe, out_path)
+
 
 
 def compile_or_repair(tex_source: str, *_, **__) -> bytes:
-    return compile_tex_with_tectonic(_sanitize_tex_math(tex_source))
-
-
+    safe = _escape_percent_outside_math(tex_source)
+    safe = latex_backup_translate(safe)
+    safe = _sanitize_tex_math(safe)
+    return compile_tex_with_tectonic(safe)
 
 def parallel_map(func, iterable, max_workers=8):
     results = [None] * len(iterable)
@@ -1863,16 +2078,20 @@ def parallel_map(func, iterable, max_workers=8):
             results[idx] = fut.result()
     return results
 
+
 # --- Stage 11: content sniffing & zip safety ---
 
 def _looks_pdf(head: bytes) -> bool:
     return head.startswith(b"%PDF-")
 
+
 def _looks_rtf(head: bytes) -> bool:
     return head.startswith(b"{\\rtf")
 
+
 def _looks_zip(head: bytes) -> bool:
     return head.startswith(b"PK\x03\x04") or head.startswith(b"PK\x05\x06") or head.startswith(b"PK\x07\x08")
+
 
 def _office_zip_kind(fp: str) -> str | None:
     """Return 'docx' if it looks like a Word docx, 'pptx' if a PowerPoint; else None."""
@@ -1888,6 +2107,7 @@ def _office_zip_kind(fp: str) -> str | None:
     except Exception:
         return None
     return None
+
 
 def _zip_safety_ok(fp: str) -> bool:
     """Basic zip bomb guard: total uncompressed size and ratio check."""
@@ -1906,6 +2126,7 @@ def _zip_safety_ok(fp: str) -> bool:
             return True
     except Exception:
         return False
+
 
 def allowed_file(filepath):
     ext = os.path.splitext(filepath)[1].lower()
@@ -1965,6 +2186,7 @@ def _ocr_pdf_with_tesseract(filepath: str, max_pages: int) -> str:
     except Exception as e:
         print(f"DEBUG: OCR function failed: {e}")
         return ""
+
 
 def preprocessing(filepath):
     ext = os.path.splitext(filepath)[1].lower()
@@ -2110,13 +2332,13 @@ def get_response(instruction, file, model=main_model, max_tokens=1024, temperatu
         full_content = ""
         # Streaming version
         with client.chat.completions.stream(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            top_p=1.0,
-            frequency_penalty=0,
-            presence_penalty=0
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                top_p=1.0,
+                frequency_penalty=0,
+                presence_penalty=0
         ) as stream:
             for event in stream:
                 if event.type == "message.delta" and event.delta.content:
@@ -2232,6 +2454,7 @@ def website():
 
         status = 200 if ok else 503
         return {"ok": ok, "checks": checks, "time": int(time.time())}, status
+
     @app.before_request
     def _global_security_and_limits():
         # light maintenance
@@ -2259,6 +2482,7 @@ def website():
         if path.startswith("/download"):
             if not _rate_allow("download", ip, RATE_DOWNLOADS_PER_MIN):
                 return ERR["rl_download"], 429
+
     os.makedirs("templates", exist_ok=True)
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -2478,18 +2702,18 @@ button, input, select, textarea { font: inherit; }
       border: 1px solid var(--border);
       display: none;
     }
-    
+
     .progress-section.show {
       display: block;
     }
-    
+
     .progress-header {
       display: flex;
       align-items: center;
       gap: 12px;
       margin-bottom: 16px;
     }
-    
+
     .progress-bar-container {
       width: 100%;
       height: 8px;
@@ -2498,19 +2722,19 @@ button, input, select, textarea { font: inherit; }
       overflow: hidden;
       margin-bottom: 12px;
     }
-    
+
     .progress-bar {
       height: 100%;
       background: linear-gradient(90deg, var(--brand), #7aa6ff);
       width: 0%;
       transition: width 0.3s ease;
     }
-    
+
     .progress-steps {
       display: grid;
       gap: 8px;
     }
-    
+
     .progress-step {
       display: flex;
       align-items: center;
@@ -2518,7 +2742,7 @@ button, input, select, textarea { font: inherit; }
       padding: 8px 0;
       font-size: 0.9rem;
     }
-    
+
     .step-icon {
       width: 20px;
       height: 20px;
@@ -2529,31 +2753,31 @@ button, input, select, textarea { font: inherit; }
       font-size: 0.75rem;
       font-weight: bold;
     }
-    
+
     .step-icon.pending {
       background: var(--chip);
       color: var(--muted);
     }
-    
+
     .step-icon.active {
       background: var(--brand);
       color: white;
     }
-    
+
     .step-icon.complete {
       background: var(--ok);
       color: white;
     }
-    
+
     .step-text {
       flex: 1;
     }
-    
+
     .step-time {
       color: var(--muted);
       font-size: 0.85rem;
     }
-    
+
     .time-estimate {
       background: var(--chip);
       padding: 8px 12px;
@@ -2628,7 +2852,7 @@ button, input, select, textarea { font: inherit; }
     .fade-in {
       animation: fadeIn 0.3s ease-in;
     }
-    
+
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(10px); }
       to { opacity: 1; transform: translateY(0); }
@@ -2771,7 +2995,7 @@ details[open] .adv-summary::after{
 
         <div class="files" id="file-list" aria-live="polite"></div>
         <hr style="border:none; border-top:1px solid var(--border); margin:16px 0">
-        
+
         <div class="field">
           <label for="manualText">Or, if you prefer, describe some of the exam materials yourself:</label>
           <textarea id="manualText" rows="6" placeholder="Paste or type your study material here..."></textarea>
@@ -2803,7 +3027,7 @@ details[open] .adv-summary::after{
   </div>
 </div>
         <div id="optDifficulty" class="field" style="margin-top:12px">
-  <label for="difficulty">Difficulty level for all questions:</label>
+  <label for="difficulty">Overall difficulty level:</label>
   <div class="radio-inline" role="radiogroup" aria-label="Difficulty level">
     <label><input type="radio" name="difficulty" id="diff-easy" value="easy"> Easy <span class="help">(fastest)</span></label>
     <label><input type="radio" name="difficulty" id="diff-medium" value="medium" checked> Medium <span class="help">(standard)</span></label>
@@ -2866,15 +3090,15 @@ details[open] .adv-summary::after{
         <h3 style="margin:0; font-size:1.1rem;">Generating your exam paper...</h3>
         <div class="spinner"></div>
       </div>
-      
+
       <div class="time-estimate">
         <strong>Estimated time:</strong> <span id="timeEstimate">30-60 seconds</span>
       </div>
-      
+
       <div class="progress-bar-container">
         <div id="progressBar" class="progress-bar"></div>
       </div>
-      
+
       <div class="progress-steps" id="progressSteps">
         <div class="progress-step">
           <div class="step-icon pending" id="step1">1</div>
@@ -3170,39 +3394,39 @@ refreshSubmitState();
       const enc = new TextEncoder();
       return enc.encode(str);
     }
-    
+
     function manualTextToFile(){
       const text = document.getElementById('manualText').value.trim();
       if (!text) return null;
       const blob = new Blob([text], { type: 'text/plain' });
       return new File([blob], 'manual_input.txt', { type: 'text/plain' });
     }
-    
+
     function bytesToSize(bytes){
       const u = ['B','KB','MB','GB']; let i=0, n=bytes;
       while(n>=1024 && i<u.length-1){ n/=1024; i++; }
       return n.toFixed(n>=10||i===0?0:1)+' '+u[i];
     }
-    
+
     function allowedExtension(filename){
       const idx = filename.lastIndexOf(".");
       if (idx < 0) return false;
       const ext = filename.substring(idx).toLowerCase();
       return validExts.includes(ext);
     }
-    
+
     async function calculateFileHash(file){
       const buf = await file.arrayBuffer();
       const hashBuffer = await crypto.subtle.digest('SHA-256', buf);
       const arr = Array.from(new Uint8Array(hashBuffer));
       return arr.map(b=>b.toString(16).padStart(2,'0')).join('');
     }
-    
+
     function setStatus(type, html){
       responseEl.className = 'status show ' + type;
       responseEl.innerHTML = html;
     }
-    
+
     function clearStatus(){
       responseEl.className = 'status';
       responseEl.innerHTML = '';
@@ -3280,7 +3504,7 @@ submitBtn.disabled = !(hasAnyInput && perQuestionOK);
         fileList.appendChild(item);
       });
     }
-    
+
     async function acceptFileList(list){
   clearStatus();
 
@@ -3332,14 +3556,14 @@ estimatedSeconds += numQuestions * 1.5;
     function updateProgressStep(stepNumber, status, timeText = '') {
       const stepIcon = document.getElementById(`step${stepNumber}`);
       const stepTime = document.getElementById(`time${stepNumber}`);
-      
+
       stepIcon.className = `step-icon ${status}`;
       if (status === 'complete') {
         stepIcon.innerHTML = '✓';
       } else if (status === 'active') {
         stepIcon.innerHTML = stepNumber;
       }
-      
+
       if (stepTime && timeText) {
         stepTime.textContent = timeText;
       }
@@ -3437,16 +3661,16 @@ progressBar.style.width = `${progress}%`;
         progressInterval = null;
       }
       if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
-      
+
       // Complete all remaining steps
       for (let i = 1; i <= 5; i++) {
         updateProgressStep(i, 'complete');
       }
-      
+
       progressBar.style.width = '100%';
       lastProgress = 100; // <-- add this
       visibleProgress = 100;
-      
+
       // Hide progress section after a brief delay
       setTimeout(() => {
         progressSection.classList.remove('show');
@@ -3459,7 +3683,7 @@ progressBar.style.width = `${progress}%`;
         progressInterval = null;
       }
       if (statusInterval) { clearInterval(statusInterval); statusInterval = null; }
-      
+
       progressSection.classList.remove('show');
 progressBar.style.width = '0%';
 lastProgress = 0;
@@ -3467,7 +3691,7 @@ serverProgress = 0;
 visibleProgress = 0;    // <-- add
 genStartTs = 0;         // <-- add
 
-      
+
       // Reset all steps
       for (let i = 1; i <= 5; i++) {
         updateProgressStep(i, 'pending');
@@ -3883,7 +4107,7 @@ function renderAdvGrid() {
       <div class="qopt qopt-topic is-disabled">
         <label for="topic_${item.id}">Additional instructions:</label>
         <textarea id="topic_${item.id}" placeholder="e.g. Make this a multi-part question about the periodic table" disabled maxlength="200" rows="3"></textarea>
-        
+
       </div>
 
       <!-- b) Difficulty -->
@@ -4024,7 +4248,7 @@ if (!result.ok) {
   }
 }
     }
-    
+
     submitBtn.onclick = submitFiles;
 
     // Keyboard activation for drop area
@@ -4089,6 +4313,7 @@ refreshSubmitState();
             CANCELED_JOBS.add(job)
         # Do NOT mark PROGRESS as 'done' here; the client handles UI reset on cancel.
         return {"ok": True}, 200
+
     @app.route("/smoke/local")
     def smoke_local():
         tex = r"""
@@ -4107,6 +4332,7 @@ refreshSubmitState();
             return send_from_directory(OUTPUT_DIR, "smoke.pdf", as_attachment=True)
         except Exception as e:
             return (f"LaTeX compile failed: {str(e)[:4000]}", 500)
+
     @app.route("/download/<kind>")
     def download(kind: str):
         filename = "questions.pdf" if kind == "questions" else ("answers.pdf" if kind == "answers" else None)
@@ -4143,6 +4369,7 @@ refreshSubmitState();
             "timestamp": meta.get("timestamp"),
         }
         return safe, 200
+
     def continue_mark_scheme(prev_text: str, start_idx: int, end_idx: int, questions_text: str, max_tokens: int) -> str:
         instr = (f"Continue the mark scheme starting from item {start_idx} to {end_idx}. "
                  "Use terse bullet points per item. Do not repeat previous items.\n\n"
@@ -4452,6 +4679,7 @@ refreshSubmitState();
             if not filepaths:
                 return fail_progress(job, pct=96, step=1, label="No valid files",
                                      http_status=400, msg=ERR["no_valid_files"])
+
             def _proc(i, p):
                 return i, (preprocessing(p) or "")
 
@@ -4484,15 +4712,30 @@ refreshSubmitState();
 
             per_file_tokens = [fast_token_estimate(d) for d in docs]
             # --- NEW: if materials are mathematical and user didn't specify types, force all to Math ---
+            # --- NEW: if materials are mathematical and user didn't specify types, set Math proportionally ---
             try:
-                # treat "no types" as: param absent, empty string, or explicit empty array string
                 _raw_qtypes = request.form.get("q_types")
                 _no_types = (_raw_qtypes is None) or (str(_raw_qtypes).strip() in ("", "[]"))
 
-                if legacy_total == 0 and _no_types and looks_mathematical_docs(docs):
-                    for it in blueprint:
-                        it["type"] = "Math"  # keep any per-item topic/difficulty already applied
-                    set_progress(job, 28, step=2, label="Auto-set all question types to Math (math content detected)")
+                if legacy_total == 0 and _no_types:
+                    sig = math_content_signals(docs)
+                    N = len(blueprint)
+
+                    # Strong signal: make ALL Math only if clearly math-heavy
+                    if sig["score"] >= 0.78 or (sig["has_delims"] and sig["hits"] >= 30):
+                        for it in blueprint:
+                            it["type"] = "Math"
+                        set_progress(job, 28, step=2,
+                                     label=f"Auto-set ALL {N} items to Math (strong math content detected)")
+                    # Mixed signal: set a proportion to Math; leave the rest conceptual (Long/Short/MCQ)
+                    elif sig["score"] >= 0.32:
+                        target = max(1, min(N, round(sig["score"] * 0.60 * N)))
+                        idxs = _pick_math_slots(blueprint, target)
+                        for i in idxs:
+                            blueprint[i]["type"] = "Math"
+                        set_progress(job, 28, step=2,
+                                     label=f"Auto-set {len(idxs)}/{N} items to Math (mixed content detected)")
+                    # Weak/none: leave blueprint types as-is (no auto-math)
             except Exception:
                 # detector must never break generation; if anything goes wrong, silently continue
                 pass
@@ -4682,10 +4925,12 @@ refreshSubmitState();
             q_items = enforce_hard_math(
                 q_items, blueprint, difficulty_norm, model=main_model, n_out_q_cap=n_out_q_cap, max_regens=2
             )
+
             # LaTeX-safe transform + fixers
             def process_latex_item(item: str) -> str:
                 item = normalize_for_latex(item)
-                item = _escape_percent_outside_math(item)  # NEW
+                item = _escape_percent_outside_math(item)
+                item = latex_backup_translate(item)
                 item = _sanitize_tex_math(item)
                 return item
 
@@ -4784,8 +5029,10 @@ refreshSubmitState();
                 pass
             return fail_progress(job, pct=98, step=5, label="Internal error",
                                  http_status=500, msg=ERR["internal"])
+
     # Stage 14: log effective config (no secrets)
-    app.logger.info("Config: MODELS main=%s summary=%s | TECTONIC_TIMEOUT=%ss", main_model, summary_model, TECTONIC_TIMEOUT)
+    app.logger.info("Config: MODELS main=%s summary=%s | TECTONIC_TIMEOUT=%ss", main_model, summary_model,
+                    TECTONIC_TIMEOUT)
     app.logger.info("Limits: MAX_FILES=%d, MAX_FILE_MB=%d, TOTAL_UPLOAD_MB=%d", MAX_FILES, MAX_FILE_MB, TOTAL_UPLOAD_MB)
     app.logger.info("Caps: SUMMARY %d (%d..%d), Q_IN=%d, Q_OUT=%d, A_OUT=%d",
                     RECOMMENDED_SUMMARY_TOKENS, SUMMARY_TOKENS_HARD_MIN, SUMMARY_TOKENS_HARD_MAX,
@@ -4817,13 +5064,15 @@ refreshSubmitState();
     def _ise(e):
         # Avoid leaking stack traces in prod; logs already capture exception
         return "Internal server error.", 500
+
     return app
+
 
 if __name__ == "__main__":
     # Stage 1: env-driven dev run (prod should use a WSGI server like gunicorn)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    debug = os.getenv("FLASK_DEBUG", "0").lower() in ("1","true","yes","on")
-    host  = os.getenv("APP_HOST", "0.0.0.0")
-    port  = int(os.getenv("APP_PORT", "5000"))
+    debug = os.getenv("FLASK_DEBUG", "0").lower() in ("1", "true", "yes", "on")
+    host = os.getenv("APP_HOST", "0.0.0.0")
+    port = int(os.getenv("APP_PORT", "5000"))
     app = website()  # website() should return `app` (see next change)
     app.run(debug=debug, host=host, port=port, threaded=True)
