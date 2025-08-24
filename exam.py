@@ -3286,10 +3286,10 @@ submitBtn.disabled = !(hasAnyInput && perQuestionOK);
 estimatedSeconds += totalFiles * 3;
 estimatedSeconds += numQuestions * 1.5;
 
-  if (estimatedSeconds < 20) return "15-30 seconds";
-  if (estimatedSeconds < 40) return "30-45 seconds";
-  if (estimatedSeconds < 60) return "45-60 seconds";
-  return "60-90 seconds";
+  if (estimatedSeconds < 20) return "30-45 seconds";
+  if (estimatedSeconds < 40) return "45-60 seconds";
+  if (estimatedSeconds < 60) return "60-90 seconds";
+  return "1-2 minutes";
 }
 
     function updateProgressStep(stepNumber, status, timeText = '') {
@@ -4807,4 +4807,4 @@ if __name__ == "__main__":
     host = os.getenv("APP_HOST", "0.0.0.0")
     port = int(os.getenv("APP_PORT", "5000"))
     app = website()  # website() should return `app` (see next change)
-    app.run(debug=debug, host=host, port=port, threaded=True)
+    app.run(debug=True, host=host, port=port, threaded=True, use_reloader=False)
