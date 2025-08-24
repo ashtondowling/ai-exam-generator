@@ -4730,7 +4730,6 @@ refreshSubmitState();
             a_tex = tex_from_items(a_items, default_title.title() + " Answers")
             # NEW: single OpenAI pass to sanitize LaTeX for both docs
             q_tex, a_tex = sanitize_latex_pair(client, q_tex, a_tex)
-            set_progress(job, 90, step=5, label="Compiling PDFs")
             if is_canceled(job): return ("Canceled", 499)
             q_path = os.path.join(OUTPUT_DIR, "questions.pdf")
             a_path = os.path.join(OUTPUT_DIR, "answers.pdf")
@@ -4738,6 +4737,7 @@ refreshSubmitState();
             # compile sequentially, directly to disk (no giant in-RAM PDFs)
             compile_or_repair_to_path(q_tex, q_path)
             compile_or_repair_to_path(a_tex, a_path)
+            set_progress(job, 90, step=5, label="Compiling PDFs")
             _write_run_meta(
                 mode="exam",
                 title=default_title.title(),
