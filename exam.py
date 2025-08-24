@@ -3326,15 +3326,22 @@ visibleProgress = 0;
     // Handle step transitions
     const currentStepData = stepTimings[currentStep - 1];
     if (currentStepData && stepElapsed >= currentStepData.duration) {
-      const stepDuration = ((Date.now() - stepStartTime) / 1000).toFixed(1);
-      updateProgressStep(currentStep, 'complete', `${stepDuration}s`);
+  const stepDuration = ((Date.now() - stepStartTime) / 1000).toFixed(1);
 
-      currentStep++;
-      if (currentStep <= stepTimings.length) {
-        stepStartTime = Date.now();
-        updateProgressStep(currentStep, 'active');
-      }
+  if (currentStep < 5) {
+    // Steps 1–4 can turn green when their simulated time elapses
+    updateProgressStep(currentStep, 'complete', `${stepDuration}s`);
+    currentStep++;
+    if (currentStep <= stepTimings.length) {
+      stepStartTime = Date.now();
+      updateProgressStep(currentStep, 'active');
     }
+  } else {
+    // Step 5 should remain BLUE (active) until the server actually finishes.
+    // Do nothing here; completeProgress() will mark it 'complete' at the real end.
+  }
+}
+
 
     // ===== SMOOTHED HYBRID PROGRESS SECTION =====
 
