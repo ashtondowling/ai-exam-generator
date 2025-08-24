@@ -725,7 +725,7 @@ SUMMARY_TOKENS_HARD_MAX = env_int("APP_SUMMARY_MAX", 1600)  # was 800
 
 ALWAYS_SAFE_MAIN_Q_INPUT_CAP = env_int("APP_Q_INPUT_CAP", 12_000)
 TARGET_MAX_N_OUT_Q = env_int("APP_Q_OUT_CAP", 4_000)
-TARGET_MAX_N_OUT_A = env_int("APP_A_OUT_CAP", 4500)
+TARGET_MAX_N_OUT_A = env_int("APP_A_OUT_CAP", 6_000)
 SUM_MIN_K = env_int("APP_SUM_MIN_K", 2)
 SUM_MAX_K = env_int("APP_SUM_MAX_K", 4)
 
@@ -876,24 +876,26 @@ def _read_run_meta() -> dict | None:
 
 
 def get_quality_answer_instruction():
-    return """Create a comprehensive mark scheme for this question paper.
+    return """Create a comprehensive mark scheme for this question paper. You MUST provide answers for ALL questions in the paper.
 
 Quality Requirements:
-- Provide detailed marking criteria for each question
+- Provide detailed marking criteria for EVERY question
 - Include multiple acceptable answer variations where appropriate
 - For long answers: break down into clear marking points with allocated marks
 - For short answers: provide complete answers with key terms highlighted
 - For MCQ: state correct answer and explain why other options are incorrect
 - For math: show complete working with step-by-step solutions
 
-Format:
-- Number each answer to match the question paper exactly
+Critical Format Requirements:
+- Number each answer to match the question paper exactly (1., 2., 3., etc.)
 - Use clear, concise marking points separated by ';'
 - Use inline math (\\( ... \\)); do NOT insert manual line breaks `\\\\`
+- Do NOT stop until you have answered every single question
+
+IMPORTANT: Generate ALL answers in one response. Do not stop early.
 
 Focus on accuracy and completeness over brevity.
 """
-
 
 def fast_token_estimate(text: str) -> int:
     """Faster token estimation using character count heuristic"""
@@ -4692,11 +4694,16 @@ refreshSubmitState();
             a_items = split_numbered_items(answers)
 
             # If under-filled, continue with a blueprint-aware prompt
-            if len(a_items) < answers_needed:
+            # If under-filled, continue with multiple attempts
+            max_attempts = 3
+            attempt = 0
+            while len(a_items) < answers_needed and attempt < max_attempts:
+                attempt += 1
                 start_missing = len(a_items) + 1
-                end_missing = answers_needed
+                end_missing = min(answers_needed, start_missing + 5)  # Generate 5 at a time max
+
                 cont_a_instr = continue_mark_scheme_from_blueprint(
-                    prev_text=answers,
+                    prev_text="\n\n".join([f"{i + 1}. {item}" for i, item in enumerate(a_items)]),
                     start_idx=start_missing,
                     end_idx=end_missing,
                     questions_text=questions,
@@ -4706,10 +4713,11 @@ refreshSubmitState();
                     cont_a_instr,
                     "",
                     model=main_model,
-                    max_tokens=int(n_out_a_cap * 0.8),
+                    max_tokens=n_out_a_cap,
                     temperature=0.2
                 )
-                a_items += split_numbered_items(cont_a)[: (answers_needed - len(a_items))]
+                new_items = split_numbered_items(cont_a)
+                a_items += new_items[: (answers_needed - len(a_items))]
 
             # Enforce 1:1 alignment with blueprint length
             if len(a_items) > answers_needed:
