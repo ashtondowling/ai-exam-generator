@@ -725,7 +725,7 @@ SUMMARY_TOKENS_HARD_MAX = env_int("APP_SUMMARY_MAX", 1600)  # was 800
 
 ALWAYS_SAFE_MAIN_Q_INPUT_CAP = env_int("APP_Q_INPUT_CAP", 12_000)
 TARGET_MAX_N_OUT_Q = env_int("APP_Q_OUT_CAP", 4_000)
-TARGET_MAX_N_OUT_A = env_int("APP_A_OUT_CAP", 2_500)
+TARGET_MAX_N_OUT_A = env_int("APP_A_OUT_CAP", 4500)
 SUM_MIN_K = env_int("APP_SUM_MIN_K", 2)
 SUM_MAX_K = env_int("APP_SUM_MAX_K", 4)
 
@@ -4706,7 +4706,7 @@ refreshSubmitState();
                     cont_a_instr,
                     "",
                     model=main_model,
-                    max_tokens=int(n_out_a_cap * 0.5),
+                    max_tokens=int(n_out_a_cap * 0.8),
                     temperature=0.2
                 )
                 a_items += split_numbered_items(cont_a)[: (answers_needed - len(a_items))]
