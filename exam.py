@@ -444,8 +444,18 @@ def _escape_percent_outside_math(text: str) -> str:
     protected, restore = _protect_math_segments(text)
     protected = protected.replace('%', r'\%')
     return restore(protected)
+# --- NEW: extra escapes outside math to prevent fatal LaTeX errors ---
+def _escape_underscores_outside_math(text: str) -> str:
+    """Escape '_' outside math; leave math segments untouched."""
+    protected, restore = _protect_math_segments(text)
+    protected = protected.replace('_', r'\_')
+    return restore(protected)
 
-
+def _escape_ampersand_hash_outside_math(text: str) -> str:
+    """Escape '&' and '#' outside math; leave math segments untouched."""
+    protected, restore = _protect_math_segments(text)
+    protected = protected.replace('&', r'\&').replace('#', r'\#')
+    return restore(protected)
 def _wrap_exponents_outside_math(text: str) -> str:
     protected, restore = _protect_math_segments(text)
     protected = re.sub(r'\b([A-Za-z0-9])\s*\^\s*\(([^)]+)\)', r'$\1^{(\2)}$', protected)
@@ -960,8 +970,40 @@ def _emergency_tex_sanitize(tex: str) -> str:
     tex = re.sub(r'\\sqrt(?!\s*\{)', r'\\sqrt{}', tex)
 
     return _sanitize_tex_math(tex)
+# --- NEW: math delimiter/env/balancer helpers ---
 
+def _normalize_display_dollars(tex: str) -> str:
+    r"""Turn $$ ... $$ into \[ ... \] to avoid inline-dollar ambiguity."""
+    return re.sub(r'\$\$(.+?)\$\$', r'\\[\1\\]', tex, flags=re.S)
 
+def _normalize_simple_equation_envs(tex: str) -> str:
+    r"""
+    Convert simple display math environments to \[ ... \] to avoid nesting/env mismatches
+    inside item text.
+    """
+    def repl(m):
+        # m.group(1) is the env name; m.group(2) is the body
+        return r'\[' + m.group(2) + r'\]'
+    # equation / equation* / align / align*
+    return re.sub(
+        r'\\begin\{(equation\*?|align\*?)\}(.+?)\\end\{\1\}',
+        repl, tex, flags=re.S
+    )
+
+def _balance_left_right_in_math(tex: str) -> str:
+    r"""
+    If a math segment has unmatched \left or \right, drop ALL \left/\right in that segment.
+    This is conservative but compilation-safe.
+    """
+    def fix(inner: str) -> str:
+        lefts  = len(re.findall(r'\\left\b', inner))
+        rights = len(re.findall(r'\\right\b', inner))
+        if lefts == rights:
+            return inner
+        inner = re.sub(r'\\left\s*',  '', inner)
+        inner = re.sub(r'\\right\s*', '', inner)
+        return inner
+    return _transform_inside_math(tex, fix)
 def plan_summarization_sla(
         timings_so_far: dict,
         n_files: int,
@@ -2071,19 +2113,44 @@ def compile_tex_with_tectonic_to_path(tex_source: str, out_path: str, *, timeout
         shutil.move(pdf_src, out_path)
 
 
+def _pre_sanitize_all(tex_source: str) -> str:
+    s = normalize_for_latex(tex_source)
+    s = _escape_percent_outside_math(s)
+    s = _escape_underscores_outside_math(s)        # NEW
+    s = _escape_ampersand_hash_outside_math(s)     # NEW
+    s = latex_backup_translate(s)
+    s = _sanitize_tex_math(s)
+    s = _normalize_display_dollars(s)              # NEW
+    s = _normalize_simple_equation_envs(s)         # NEW
+    s = _balance_left_right_in_math(s)             # NEW
+    return s
+
 def compile_or_repair_to_path(tex_source: str, out_path: str) -> None:
-    safe = _escape_percent_outside_math(tex_source)
-    safe = latex_backup_translate(safe)
-    safe = _sanitize_tex_math(safe)
-    return compile_tex_with_tectonic_to_path(safe, out_path)
-
-
+    safe = _pre_sanitize_all(tex_source)
+    try:
+        return compile_tex_with_tectonic_to_path(safe, out_path)
+    except Exception:
+        # Emergency heavy-handed sanitize, then one more attempt
+        try:
+            safe2 = _emergency_tex_sanitize(safe)
+            return compile_tex_with_tectonic_to_path(safe2, out_path)
+        except Exception:
+            # Final fallback: model-based latex normalizer (minimal edits)
+            safe3 = ai_fix_latex(safe2, client, model="gpt-4o-mini", max_tokens=2000)
+            return compile_tex_with_tectonic_to_path(safe3, out_path)
 
 def compile_or_repair(tex_source: str, *_, **__) -> bytes:
-    safe = _escape_percent_outside_math(tex_source)
-    safe = latex_backup_translate(safe)
-    safe = _sanitize_tex_math(safe)
-    return compile_tex_with_tectonic(safe)
+    safe = _pre_sanitize_all(tex_source)
+    try:
+        return compile_tex_with_tectonic(safe)
+    except Exception:
+        try:
+            safe2 = _emergency_tex_sanitize(safe)
+            return compile_tex_with_tectonic(safe2)
+        except Exception:
+            safe3 = ai_fix_latex(safe2, client, model="gpt-4o-mini", max_tokens=2000)
+            return compile_tex_with_tectonic(safe3)
+
 
 def parallel_map(func, iterable, max_workers=8):
     results = [None] * len(iterable)
@@ -4945,9 +5012,17 @@ refreshSubmitState();
             # LaTeX-safe transform + fixers
             def process_latex_item(item: str) -> str:
                 item = normalize_for_latex(item)
+                # Escapes outside math (now covers %, _, &, #)
                 item = _escape_percent_outside_math(item)
+                item = _escape_underscores_outside_math(item)  # NEW
+                item = _escape_ampersand_hash_outside_math(item)  # NEW
+                # Heuristic text→LaTeX conversions & math fixes
                 item = latex_backup_translate(item)
+                # Minimal math sanitizer + new normalizers
                 item = _sanitize_tex_math(item)
+                item = _normalize_display_dollars(item)  # NEW
+                item = _normalize_simple_equation_envs(item)  # NEW
+                item = _balance_left_right_in_math(item)  # NEW
                 return item
 
             q_items = parallel_map(lambda i, item: process_latex_item(item), q_items, max_workers=4)
@@ -5001,8 +5076,13 @@ refreshSubmitState();
             # --- ANSWERS SANITIZE (mirror questions + new sqrt/frac fixes) ---
             # --- ANSWERS SANITIZE (simple) ---
             a_items = [normalize_for_latex(it) for it in a_items]
-            a_items = [_escape_percent_outside_math(it) for it in a_items]  # NEW
+            a_items = [_escape_percent_outside_math(it) for it in a_items]
+            a_items = [_escape_underscores_outside_math(it) for it in a_items]  # NEW
+            a_items = [_escape_ampersand_hash_outside_math(it) for it in a_items]  # NEW
             a_items = [_sanitize_tex_math(it) for it in a_items]
+            a_items = [_normalize_display_dollars(it) for it in a_items]  # NEW
+            a_items = [_normalize_simple_equation_envs(it) for it in a_items]  # NEW
+            a_items = [_balance_left_right_in_math(it) for it in a_items]  # NEW
 
             set_progress(job, 85, step=5, label="Mark scheme ready")
             if is_canceled(job): return ("Canceled", 499)
