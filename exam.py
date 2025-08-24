@@ -303,27 +303,6 @@ def clamp_items(items: list[str], n: int) -> list[str]:
 
 
 RISK_PATTERNS = [re.compile(p) for p in _AI_RISK_PATTERNS]
-
-
-def ai_fix_latex(text: str, client, model: str = "gpt-4o-mini", max_tokens: int = 2000) -> str:
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            temperature=0,
-            max_tokens=max_tokens,
-            messages=[
-                {"role": "system", "content": AI_LATEX_SYSTEM_PROMPT},
-                {"role": "user", "content": text}
-            ],
-        )
-        out = resp.choices[0].message.content or ""
-        if 0.5 <= (len(out) / max(1, len(text))) <= 1.5:
-            return out
-        return text
-    except Exception:
-        return text
-
-
 def patch_left_right(text: str) -> str:
     def _balance(pair_open, pair_close, left_cmd=r'\\left', right_cmd=r'\\right'):
         opens = len(re.findall(left_cmd + r'\s*' + re.escape(pair_open), text))
@@ -398,25 +377,6 @@ _MATH_SEGMENT_PATTERN = re.compile(
     re.MULTILINE
 )
 
-
-def _protect_math_segments(text: str):
-    placeholders = []
-
-    def repl(m):
-        idx = len(placeholders)
-        placeholders.append(m.group(0))
-        return f"@@MATH{idx}@@"
-
-    protected = _MATH_SEGMENT_PATTERN.sub(repl, text)
-
-    def restore(s):
-        for i, seg in enumerate(placeholders):
-            s = s.replace(f"@@MATH{i}@@", seg)
-        return s
-
-    return protected, restore
-
-
 def _transform_inside_math(tex: str, fn_disp_and_inl):
     def repl_disp(m):
         inner = m.group(1)
@@ -437,47 +397,6 @@ def _transform_inline_math_only(tex: str, fn_inl):
         return r'\(' + fn_inl(inner) + r'\)'
 
     return re.sub(r'\\\((.+?)\\\)', repl_inl, tex, flags=re.S)
-
-
-def _escape_percent_outside_math(text: str) -> str:
-    r"""Replace literal % with \% outside math, leave math segments untouched."""
-    protected, restore = _protect_math_segments(text)
-    protected = protected.replace('%', r'\%')
-    return restore(protected)
-# --- NEW: extra escapes outside math to prevent fatal LaTeX errors ---
-def _escape_underscores_outside_math(text: str) -> str:
-    """Escape '_' outside math; leave math segments untouched."""
-    protected, restore = _protect_math_segments(text)
-    protected = protected.replace('_', r'\_')
-    return restore(protected)
-
-def _escape_ampersand_hash_outside_math(text: str) -> str:
-    """Escape '&' and '#' outside math; leave math segments untouched."""
-    protected, restore = _protect_math_segments(text)
-    protected = protected.replace('&', r'\&').replace('#', r'\#')
-    return restore(protected)
-def _wrap_exponents_outside_math(text: str) -> str:
-    protected, restore = _protect_math_segments(text)
-    protected = re.sub(r'\b([A-Za-z0-9])\s*\^\s*\(([^)]+)\)', r'$\1^{(\2)}$', protected)
-    protected = re.sub(r'\b([A-Za-z0-9])\s*\^\s*([+-]?\d+)\b', r'$\1^{\2}$', protected)
-    protected = re.sub(r'\b([A-Za-z0-9])\s*\^\s*([A-Za-z])\b', r'$\1^{\2}$', protected)
-    protected = re.sub(r'\b([A-Za-z0-9])\s*\^\s*([+-]?\d+)(?=\s*[A-Za-z])', r'$\1^{\2}$', protected)
-    return restore(protected)
-def _fix_caret_paren_across_lines(text: str) -> str:
-    """
-    Outside math only: wrap patterns like 'e^  \n  (-x)' or 'k ^ (+2t)'
-    into $e^{(-x)}$, $k^{(+2t)}$ etc. Handles optional whitespace/newlines/signs.
-    """
-    protected, restore = _protect_math_segments(text)
-    # letter/number token, optional spaces/newlines, caret, optional spaces/newlines, '(', inner, ')'
-    # inner is conservative to avoid gobbling paragraphs
-    pat = re.compile(
-        r'(?P<base>\b[A-Za-z0-9])\s*\^\s*[\r\n\t ]*\(\s*(?P<inner>[^()]{1,120}?)\s*\)',
-        flags=re.MULTILINE
-    )
-    protected = pat.sub(lambda m: r'$\g<base>^{(\g<inner>)}$', protected)
-    return restore(protected)
-
 def _replace_super_sub_sequences(text: str) -> str:
     def sup_repl(m):
         mapped = "".join(SUPERS.get(ch, "") for ch in m.group(0))
@@ -656,28 +575,6 @@ def _fix_malformed_frac_text(tex: str) -> str:
 
     return _transform_inside_math(tex, fix)
 
-
-def _sanitize_backslashes(tex: str) -> str:
-    # remove \\ inside inline math (illegal), keep display math untouched
-    tex = _transform_inline_math_only(tex, lambda s: re.sub(r'\\\\+', ' ', s))
-    # now outside math: drop trailing \\ and soften other \\ into a space
-    protected, restore = _protect_math_segments(tex)
-    # trailing at end-of-item/line or before punctuation
-    protected = re.sub(r'\s*\\\\\s*(?=(?:$|\n|[)\]\}.,;:]))', ' ', protected)
-    # remaining: collapse to single space
-    protected = re.sub(r'\\\\+', ' ', protected)
-    return restore(protected)
-
-
-def _context_aware_math(text: str) -> str:
-    protected, restore = _protect_math_segments(text)
-    # e^(...)  →  $e^{(...)}$
-    protected = re.sub(r'\be\s*\^\s*\(\s*([^)]+?)\s*\)', r'$e^{(\1)}$', protected, flags=re.S)
-    # e^+x or e^-x → $e^{+x}$ / $e^{-x}$
-    protected = re.sub(r'\be\s*\^\s*([+\-]?[A-Za-z0-9])\b', r'$e^{\1}$', protected)
-    return restore(protected)
-
-
 def convert_slashes_only_inside_math(tex: str) -> str:
     def _fracify(inner: str) -> str:
         return re.sub(
@@ -687,52 +584,6 @@ def convert_slashes_only_inside_math(tex: str) -> str:
         )
 
     return _transform_inside_math(tex, _fracify)
-
-
-def latex_backup_translate(text: str) -> str:
-    if not text:
-        return text
-
-    # 1) Plain-text normalization + obvious symbol rewrites
-    text = normalize_for_latex(text)
-    text = _fix_caret_paren_across_lines(text)
-    text = _wrap_exponents_outside_math(text)
-    text = _context_aware_math(text)
-    for k, v in FRACTIONS.items(): text = text.replace(k, v)
-    for k, v in GREEK_MAP.items():   text = text.replace(k, v)
-    for k, v in LATEX_CHAR_MAP.items():
-        if v: text = text.replace(k, v)
-
-    # 2) Limits and common math symbol families
-    text = _limits_op(text, "∬", r"\\iint")
-    text = _limits_op(text, "∭", r"\\iiint")
-    text = _limits_op(text, "∮", r"\\oint")
-    text = _limits_op(text, "∫", r"\\int")
-    text = _limits_op(text, "∑", r"\\sum")
-    text = _limits_op(text, "∏", r"\\prod")
-
-    # 3) Basic math cleanups
-    text = _replace_sqrt(text)
-    text = _replace_super_sub_sequences(text)
-    text = re.sub(r"°\s*C", lambda m: r"$^{\circ}$C", text)
-    text = re.sub(r'\bdy/dx\b', lambda m: r'$\frac{dy}{dx}$', text)
-    text = re.sub(r'\bd/dx\b', lambda m: r'$\frac{d}{dx}$', text)
-
-    # 4) *** New guards to prevent malformed fractions/units ***
-    text = _fix_text_macros_in_math(text)  # e.g. "\text dm" -> "\text{dm}"; balances \text inside \frac
-    text = _fix_frac_forms_in_math(text)  # e.g. "\frac a b" -> "\frac{a}{b}"
-    text = _fix_sqrt_args_in_math(text)  # e.g. "\sqrt x" -> "\sqrt{x}"
-    text = _fix_frac_sqrt_edgecases_in_math(text)  # e.g. "\frac{\sqrt}{A}{B}" -> "\frac{\sqrt{A}}{B}"
-    text = _fix_veclike_args_in_math(text)  # e.g. "\vec x" -> "\vec{x}"
-    text = convert_slashes_only_inside_math(text)  # "a/b" -> "\frac{a}{b}" inside math only
-    text = _fix_malformed_frac_text(text)  # <-- includes the specific \frac{\text}{kJ}{\text{mol}} fix
-
-    # 5) Final surface cleanup
-    text = _sanitize_backslashes(text)  # drop stray "\\" outside display math
-    text = _wrap_naked_math(text)  # wrap leftover macro fragments in \( ... \)
-
-    return text
-
 
 # ---- NEW: math auto-wrapper for naked macros outside math ----
 _MATH_MACRO_CORE = r'(?:' + '|'.join([
@@ -811,41 +662,11 @@ def _fix_text_macros_in_math(tex: str) -> str:
 
     return _transform_inside_math(tex, fix)
 
-
-# Keep your _wrap_naked_math() from previous message.
-
-
-def _wrap_naked_math(tex: str) -> str:
-    r"""Wraps fragments containing TeX math macros with \( ... \), but leaves existing math alone."""
-    protected, restore = _protect_math_segments(tex)
-
-    # 1) Normalize stray $...$ to \( ... \)
-    protected = _DOLLAR_MATH.sub(r'\\(\1\\)', protected)
-
-    # 2) Also normalize the common '$\\to$'
-    protected = protected.replace('$\\to$', r'\(\to\)')
-
-    # 3) Wrap fragments that contain math macros but are outside math
-    def repl(m):
-        frag = m.group('frag')
-        # If it's already inside \( ... \) (shouldn't be, we protected), skip
-        if frag.strip().startswith(r'\(') and frag.strip().endswith(r'\)'):
-            return frag
-        return r'\(' + frag.strip() + r'\)'
-
-    # Apply repeatedly in case multiple fragments exist on a line
-    for _ in range(3):
-        protected = _MATHY_FRAGMENT.sub(repl, protected)
-
-    return restore(protected)
-
-
-# =========================
 # Models
 # =========================
 # Stage 14: allow overriding models via env
 summary_model = env_str("OPENAI_MODEL_SUMMARY", "gpt-4o-mini")
-main_model = env_str("OPENAI_MODEL_MAIN", "gpt-4o-mini")
+main_model = env_str("OPENAI_MODEL_MAIN", "chatgpt-4o-latest")
 
 
 # Dedicated answers model for "question paper" mode (overridable via env)
@@ -867,22 +688,6 @@ def adaptive_summary_length(file_tokens: int, target_summary_tokens: int, conten
 def unicode_to_ascii(s):
     normalized = unicodedata.normalize("NFKD", s)
     return "".join(c for c in normalized if not unicodedata.combining(c))
-
-
-def normalize_for_latex(s: str) -> str:
-    s = unicodedata.normalize("NFKD", s)
-    s = "".join(ch for ch in s if not unicodedata.combining(ch))
-    punct_map = {
-        "“": "\"", "”": "\"", "„": "\"", "«": "\"", "»": "\"",
-        "‘": "'", "’": "'", "‚": "'", "–": "-", "—": "-", "−": "-",
-        "…": "...", "\u00A0": " ",
-    }
-    for k, v in punct_map.items():
-        s = s.replace(k, v)
-    s = unicode_to_ascii(s)
-    return s
-
-
 # =========================
 # Latency models
 # =========================
@@ -933,77 +738,6 @@ def estimate_compile_seconds() -> float:
     # Empirical, conservative for two Tectonic runs in parallel
     return 5.0
 
-
-def _emergency_tex_sanitize(tex: str) -> str:
-    """Emergency fixes for the most common LaTeX compilation failures."""
-    tex = _fix_caret_paren_across_lines(tex)
-    # EMERGENCY FIX 1: Most common malformed fraction pattern
-    tex = re.sub(
-        r'\\frac\s*\{\s*\\text\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*\\text\s*\{\s*([^{}]+)\s*\}\s*\}',
-        r'\\frac{\\text{\1}}{\\text{\2}}',
-        tex
-    )
-
-    # EMERGENCY FIX 2: Three-argument fractions (drop the third)
-    tex = re.sub(
-        r'\\frac\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*[^{}]+\s*\}',
-        r'\\frac{\1}{\2}',
-        tex
-    )
-
-    # EMERGENCY FIX 3: \frac{\sqrt}{A}{B} -> \frac{\sqrt{A}}{B}
-    tex = re.sub(
-        r'\\frac\s*\{\s*\\sqrt\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}',
-        r'\\frac{\\sqrt{\1}}{\2}',
-        tex
-    )
-
-    # EMERGENCY FIX 4: \frac{\sqrt}{A} -> \sqrt{A}
-    tex = re.sub(
-        r'\\frac\s*\{\s*\\sqrt\s*\}\s*\{\s*([^{}]+)\s*\}',
-        r'\\sqrt{\1}',
-        tex
-    )
-
-    # EMERGENCY FIX 5: Bare \sqrt without braces -> \sqrt{}
-    tex = re.sub(r'\\sqrt\s+([A-Za-z0-9+\-*/().])', r'\\sqrt{\1}', tex)
-    tex = re.sub(r'\\sqrt(?!\s*\{)', r'\\sqrt{}', tex)
-
-    return _sanitize_tex_math(tex)
-# --- NEW: math delimiter/env/balancer helpers ---
-
-def _normalize_display_dollars(tex: str) -> str:
-    r"""Turn $$ ... $$ into \[ ... \] to avoid inline-dollar ambiguity."""
-    return re.sub(r'\$\$(.+?)\$\$', r'\\[\1\\]', tex, flags=re.S)
-
-def _normalize_simple_equation_envs(tex: str) -> str:
-    r"""
-    Convert simple display math environments to \[ ... \] to avoid nesting/env mismatches
-    inside item text.
-    """
-    def repl(m):
-        # m.group(1) is the env name; m.group(2) is the body
-        return r'\[' + m.group(2) + r'\]'
-    # equation / equation* / align / align*
-    return re.sub(
-        r'\\begin\{(equation\*?|align\*?)\}(.+?)\\end\{\1\}',
-        repl, tex, flags=re.S
-    )
-
-def _balance_left_right_in_math(tex: str) -> str:
-    r"""
-    If a math segment has unmatched \left or \right, drop ALL \left/\right in that segment.
-    This is conservative but compilation-safe.
-    """
-    def fix(inner: str) -> str:
-        lefts  = len(re.findall(r'\\left\b', inner))
-        rights = len(re.findall(r'\\right\b', inner))
-        if lefts == rights:
-            return inner
-        inner = re.sub(r'\\left\s*',  '', inner)
-        inner = re.sub(r'\\right\s*', '', inner)
-        return inner
-    return _transform_inside_math(tex, fix)
 def plan_summarization_sla(
         timings_so_far: dict,
         n_files: int,
@@ -1322,7 +1056,43 @@ if not OPENAI_API_KEY:
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "").strip() or None
 client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL) if OPENAI_BASE_URL \
     else OpenAI(api_key=OPENAI_API_KEY)
+# --- Single-pass LaTeX sanitation (post-generation ONLY) ---
+SANITIZE_SYSTEM_PROMPT = r"""You are a precise LaTeX sanitizer.
+You will receive two LaTeX documents: QUESTIONS_TEX and ANSWERS_TEX.
+Your job is to minimally fix LaTeX so it compiles in LaTeX/MathJax/KaTeX.
 
+Hard rules:
+- Do not rewrite content or change meaning.
+- Only fix LaTeX/math issues (balance braces/environments, normalize math delimiters, pair \left/\right, close \begin/\end).
+- Normalize delimiters: $...$ -> \(...\), $$...$$ -> \[...\].
+- Convert stray Unicode math (× ÷ ≤ ≥ α …) to LaTeX only inside math.
+- Do not add packages or modify the preamble.
+- Keep numbering/labels unchanged.
+- Return strict JSON with keys "questions_tex" and "answers_tex".
+"""
+
+def sanitize_latex_pair(client, questions_tex: str, answers_tex: str) -> tuple[str, str]:
+    from json import loads
+    resp = client.chat.completions.create(
+        model="chatgpt-4o-latest",
+        temperature=0,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": SANITIZE_SYSTEM_PROMPT},
+            {"role": "user", "content": (
+                "QUESTIONS_TEX:\n" + (questions_tex or "").strip() +
+                "\n\nANSWERS_TEX:\n" + (answers_tex or "").strip()
+            )},
+        ],
+    )
+    content = resp.choices[0].message.content or "{}"
+    try:
+        data = loads(content)
+        q_out = data.get("questions_tex", questions_tex)
+        a_out = data.get("answers_tex", answers_tex)
+        return q_out, a_out
+    except Exception:
+        return questions_tex, answers_tex
 ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx", ".pptx", ".rtf"}
 VALID_MODES = {"exam"}
 DIFF_ALLOWED = {"easy", "medium", "hard"}
@@ -1878,87 +1648,6 @@ def apply_easy_bias(blueprint: list[dict], global_diff: str | None) -> list[dict
             it.setdefault("_notes", []).append("easy-bias-demote-long")
     return blueprint
 
-
-def _sanitize_tex_math(src: str) -> str:
-    r"""
-    Minimal, ordered fixes only. One pass. No fancy rules.
-    - Strip stray $ inside \( ... \)
-    - Convert $...$ -> \( ... \)
-    - Then, INSIDE MATH ONLY, run a few surgical regexes in this exact order.
-    """
-
-    # 1) Remove any $ inside existing \( ... \)
-    def _strip_dollars_inside(m: re.Match) -> str:
-        inner = m.group(1).replace('$', '')
-        return r"\(" + inner + r"\)"
-
-    src = re.sub(r"\\\((.*?)\\\)", _strip_dollars_inside, src, flags=re.DOTALL)
-
-    # 2) Convert bare $...$ to \( ... \)
-    src = re.sub(r"\$(.+?)\$", r"\\(\1\\)", src, flags=re.DOTALL)
-
-    # 3) Inside-math fixes (strict order!)
-    def _fix(inner: str) -> str:
-        s = inner
-
-        # 3.1) \text token(s) -> \text{token(s)}    (1–2 words)
-        s = re.sub(r'\\text\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)', r'\\text{\1}', s)
-
-        # 3.2) SPECIFIC BUG: \frac{\text{X}{Y}} -> \frac{\text{X}}{\text{Y}}
-        s = re.sub(
-            r'\\frac\s*\{\s*\\text\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}\s*\}',
-            r'\\frac{\\text{\1}}{\\text{\2}}',
-            s
-        )
-        # 3.2a) \text{ \frac{A}{B} [^p]? } -> \frac{A}{B[^p]?}
-        #       e.g. \text{ \frac{kg}{m}^3 } -> \frac{kg}{m^3}
-        s = re.sub(
-            r'\\text\s*\{\s*\\frac\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}\s*(\^\s*(?:\{\s*[^{}]+\s*\}|[0-9]+))?\s*\}',
-            r'\\frac{\1}{\2\3}',
-            s
-        )
-
-        # 3.2b) Units taken out of \text: \text{ m}^3 -> \mathrm{m^{3}}
-        s = re.sub(r'\\text\s*\{\s*([A-Za-z]+)\s*\}\s*\^\s*([0-9]+)', r'\\mathrm{\1^{\2}}', s)
-
-        # 3.2c) Plain units in \text: \text{ kg } -> \mathrm{kg}
-        s = re.sub(r'\\text\s*\{\s*([A-Za-z]+)\s*\}', r'\\mathrm{\1}', s)
-
-        # 3.3) \frac{\sqrt}{A}{B} -> \frac{\sqrt{A}}{B}
-        s = re.sub(
-            r'\\frac\s*\{\s*\\sqrt\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}',
-            r'\\frac{\\sqrt{\1}}{\2}',
-            s
-        )
-        # 3.4) \frac{\sqrt}{A} -> \sqrt{A}
-        s = re.sub(
-            r'\\frac\s*\{\s*\\sqrt\s*\}\s*\{\s*([^{}]+)\s*\}',
-            r'\\sqrt{\1}',
-            s
-        )
-
-        # 3.5) \sqrt A -> \sqrt{A}
-        s = re.sub(r'\\sqrt\s+([^\s{}]+)', r'\\sqrt{\1}', s)
-
-        # 3.6) \frac A B -> \frac{A}{B}
-        s = re.sub(r'\\frac\s+([^\s{}]+)\s+([^\s{}]+)', r'\\frac{\1}{\2}', s)
-
-        # 3.7) \frac{A}{B}{C} -> \frac{A}{B}  (drop 3rd)
-        s = re.sub(
-            r'\\frac\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}\s*\{\s*[^{}]+\s*\}',
-            r'\\frac{\1}{\2}',
-            s
-        )
-
-        # 3.8) Remove \\ inside inline math
-        s = re.sub(r'\\\\+', ' ', s)
-
-        return s
-
-    src = _transform_inside_math(src, _fix)
-    return src
-
-
 # --- END: TeX math sanitizer ---
 
 def _parse_seq_field(raw: str | None) -> list[str] | None:
@@ -2064,9 +1753,6 @@ _BAD_UNIT_FRACS = {
     r'\frac{\text{mol}{dm}^3}': r'\mathrm{mol\,dm^{-3}}',
     r'\frac{\text{g}{cm}^3}': r'\mathrm{g\,cm^{-3}}',
     r'\frac{\text{kg}{m}^3}': r'\mathrm{kg\,m^{-3}}',
-    r'\frac{mol}{dm^3}': r'\mathrm{mol\,dm^{-3}}',
-    r'\frac{g}{cm^3}': r'\mathrm{g\,cm^{-3}}',
-    r'\frac{kg}{m^3}': r'\mathrm{kg\,m^{-3}}',
 }
 # also fix the same pattern when not inside \frac{...}
 _BAD_UNIT_INLINE = {
@@ -2086,7 +1772,6 @@ def fix_bad_unit_fracs(tex: str) -> str:
 
 # near compile_tex_with_tectonic
 def compile_tex_with_tectonic_to_path(tex_source: str, out_path: str, *, timeout: int | None = None) -> None:
-    tex_source = fix_bad_unit_fracs(tex_source)
     timeout = TECTONIC_TIMEOUT if timeout is None else timeout
     if shutil.which("tectonic") is None:
         raise RuntimeError("tectonic not found on PATH.")
@@ -2113,43 +1798,14 @@ def compile_tex_with_tectonic_to_path(tex_source: str, out_path: str, *, timeout
         shutil.move(pdf_src, out_path)
 
 
-def _pre_sanitize_all(tex_source: str) -> str:
-    s = normalize_for_latex(tex_source)
-    s = _escape_percent_outside_math(s)
-    s = _escape_underscores_outside_math(s)        # NEW
-    s = _escape_ampersand_hash_outside_math(s)     # NEW
-    s = latex_backup_translate(s)
-    s = _sanitize_tex_math(s)
-    s = _normalize_display_dollars(s)              # NEW
-    s = _normalize_simple_equation_envs(s)         # NEW
-    s = _balance_left_right_in_math(s)             # NEW
-    return s
-
 def compile_or_repair_to_path(tex_source: str, out_path: str) -> None:
-    safe = _pre_sanitize_all(tex_source)
-    try:
-        return compile_tex_with_tectonic_to_path(safe, out_path)
-    except Exception:
-        # Emergency heavy-handed sanitize, then one more attempt
-        try:
-            safe2 = _emergency_tex_sanitize(safe)
-            return compile_tex_with_tectonic_to_path(safe2, out_path)
-        except Exception:
-            # Final fallback: model-based latex normalizer (minimal edits)
-            safe3 = ai_fix_latex(safe2, client, model="gpt-4o-mini", max_tokens=2000)
-            return compile_tex_with_tectonic_to_path(safe3, out_path)
+    return compile_tex_with_tectonic_to_path(tex_source, out_path)
+
+
+
 
 def compile_or_repair(tex_source: str, *_, **__) -> bytes:
-    safe = _pre_sanitize_all(tex_source)
-    try:
-        return compile_tex_with_tectonic(safe)
-    except Exception:
-        try:
-            safe2 = _emergency_tex_sanitize(safe)
-            return compile_tex_with_tectonic(safe2)
-        except Exception:
-            safe3 = ai_fix_latex(safe2, client, model="gpt-4o-mini", max_tokens=2000)
-            return compile_tex_with_tectonic(safe3)
+    return compile_tex_with_tectonic(tex_source)
 
 
 def parallel_map(func, iterable, max_workers=8):
@@ -5011,18 +4667,6 @@ refreshSubmitState();
 
             # LaTeX-safe transform + fixers
             def process_latex_item(item: str) -> str:
-                item = normalize_for_latex(item)
-                # Escapes outside math (now covers %, _, &, #)
-                item = _escape_percent_outside_math(item)
-                item = _escape_underscores_outside_math(item)  # NEW
-                item = _escape_ampersand_hash_outside_math(item)  # NEW
-                # Heuristic text→LaTeX conversions & math fixes
-                item = latex_backup_translate(item)
-                # Minimal math sanitizer + new normalizers
-                item = _sanitize_tex_math(item)
-                item = _normalize_display_dollars(item)  # NEW
-                item = _normalize_simple_equation_envs(item)  # NEW
-                item = _balance_left_right_in_math(item)  # NEW
                 return item
 
             q_items = parallel_map(lambda i, item: process_latex_item(item), q_items, max_workers=4)
@@ -5075,14 +4719,6 @@ refreshSubmitState();
             # After you build a_items:
             # --- ANSWERS SANITIZE (mirror questions + new sqrt/frac fixes) ---
             # --- ANSWERS SANITIZE (simple) ---
-            a_items = [normalize_for_latex(it) for it in a_items]
-            a_items = [_escape_percent_outside_math(it) for it in a_items]
-            a_items = [_escape_underscores_outside_math(it) for it in a_items]  # NEW
-            a_items = [_escape_ampersand_hash_outside_math(it) for it in a_items]  # NEW
-            a_items = [_sanitize_tex_math(it) for it in a_items]
-            a_items = [_normalize_display_dollars(it) for it in a_items]  # NEW
-            a_items = [_normalize_simple_equation_envs(it) for it in a_items]  # NEW
-            a_items = [_balance_left_right_in_math(it) for it in a_items]  # NEW
 
             set_progress(job, 85, step=5, label="Mark scheme ready")
             if is_canceled(job): return ("Canceled", 499)
@@ -5092,8 +4728,8 @@ refreshSubmitState();
             set_progress(job, 90, step=5, label="Compiling mark scheme")
             if is_canceled(job): return ("Canceled", 499)
             a_tex = tex_from_items(a_items, default_title.title() + " Answers")
-            q_tex = fix_bad_unit_fracs(q_tex)
-            a_tex = fix_bad_unit_fracs(a_tex)
+            # NEW: single OpenAI pass to sanitize LaTeX for both docs
+            q_tex, a_tex = sanitize_latex_pair(client, q_tex, a_tex)
             set_progress(job, 90, step=5, label="Compiling PDFs")
             if is_canceled(job): return ("Canceled", 499)
             q_path = os.path.join(OUTPUT_DIR, "questions.pdf")
