@@ -2864,6 +2864,16 @@ details[open] .adv-summary::after{
           <div class="step-text">Compiling PDFs...</div>
           <div class="step-time" id="time5"></div>
         </div>
+        <div class="progress-step">
+          <div class="step-icon pending" id="step6">6</div>
+          <div class="step-text">Polishing Questions...</div>
+          <div class="step-time" id="time6"></div>
+        </div>
+        <div class="progress-step">
+          <div class="step-icon pending" id="step7">7</div>
+          <div class="step-text">Polishing Answers...</div>
+          <div class="step-time" id="time7"></div>
+        </div>
       </div>
     </div>
     <!-- Downloads -->
@@ -4734,9 +4744,11 @@ refreshSubmitState();
             if is_canceled(job): return ("Canceled", 499)
             q_path = os.path.join(OUTPUT_DIR, "questions.pdf")
             a_path = os.path.join(OUTPUT_DIR, "answers.pdf")
-
+            
             # compile sequentially, directly to disk (no giant in-RAM PDFs)
+            set_progress(job, 90, step=6, label="Polishing Questions...")
             compile_or_repair_to_path(q_tex, q_path)
+            set_progress(job, 90, step=7, label="Polishing Answers...")
             compile_or_repair_to_path(a_tex, a_path)
             _write_run_meta(
                 mode="exam",
