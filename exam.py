@@ -725,7 +725,7 @@ SUMMARY_TOKENS_HARD_MAX = env_int("APP_SUMMARY_MAX", 1600)  # was 800
 
 ALWAYS_SAFE_MAIN_Q_INPUT_CAP = env_int("APP_Q_INPUT_CAP", 12_000)
 TARGET_MAX_N_OUT_Q = env_int("APP_Q_OUT_CAP", 4_000)
-TARGET_MAX_N_OUT_A = env_int("APP_A_OUT_CAP", 6_000)
+TARGET_MAX_N_OUT_A = env_int("APP_A_OUT_CAP", 12_000)
 SUM_MIN_K = env_int("APP_SUM_MIN_K", 2)
 SUM_MAX_K = env_int("APP_SUM_MAX_K", 4)
 
@@ -876,26 +876,24 @@ def _read_run_meta() -> dict | None:
 
 
 def get_quality_answer_instruction():
-    return """Create a comprehensive mark scheme for this question paper. You MUST provide answers for ALL questions in the paper.
+    return """Create a comprehensive mark scheme for this question paper.
 
 Quality Requirements:
-- Provide detailed marking criteria for EVERY question
+- Provide detailed marking criteria for each question
 - Include multiple acceptable answer variations where appropriate
 - For long answers: break down into clear marking points with allocated marks
 - For short answers: provide complete answers with key terms highlighted
 - For MCQ: state correct answer and explain why other options are incorrect
 - For math: show complete working with step-by-step solutions
 
-Critical Format Requirements:
-- Number each answer to match the question paper exactly (1., 2., 3., etc.)
+Format:
+- Number each answer to match the question paper exactly
 - Use clear, concise marking points separated by ';'
 - Use inline math (\\( ... \\)); do NOT insert manual line breaks `\\\\`
-- Do NOT stop until you have answered every single question
-
-IMPORTANT: Generate ALL answers in one response. Do not stop early.
 
 Focus on accuracy and completeness over brevity.
 """
+
 
 def fast_token_estimate(text: str) -> int:
     """Faster token estimation using character count heuristic"""
@@ -1074,26 +1072,6 @@ Hard rules:
 """
 
 def sanitize_latex_pair(client, questions_tex: str, answers_tex: str) -> tuple[str, str]:
-    from json import loads
-    resp = client.chat.completions.create(
-        model="chatgpt-4o-latest",
-        temperature=0,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": SANITIZE_SYSTEM_PROMPT},
-            {"role": "user", "content": (
-                "QUESTIONS_TEX:\n" + (questions_tex or "").strip() +
-                "\n\nANSWERS_TEX:\n" + (answers_tex or "").strip()
-            )},
-        ],
-    )
-    content = resp.choices[0].message.content or "{}"
-    try:
-        data = loads(content)
-        q_out = data.get("questions_tex", questions_tex)
-        a_out = data.get("answers_tex", answers_tex)
-        return q_out, a_out
-    except Exception:
         return questions_tex, answers_tex
 ALLOWED_EXTENSIONS = {".txt", ".pdf", ".docx", ".pptx", ".rtf"}
 VALID_MODES = {"exam"}
@@ -4694,16 +4672,11 @@ refreshSubmitState();
             a_items = split_numbered_items(answers)
 
             # If under-filled, continue with a blueprint-aware prompt
-            # If under-filled, continue with multiple attempts
-            max_attempts = 3
-            attempt = 0
-            while len(a_items) < answers_needed and attempt < max_attempts:
-                attempt += 1
+            if len(a_items) < answers_needed:
                 start_missing = len(a_items) + 1
-                end_missing = min(answers_needed, start_missing + 5)  # Generate 5 at a time max
-
+                end_missing = answers_needed
                 cont_a_instr = continue_mark_scheme_from_blueprint(
-                    prev_text="\n\n".join([f"{i + 1}. {item}" for i, item in enumerate(a_items)]),
+                    prev_text=answers,
                     start_idx=start_missing,
                     end_idx=end_missing,
                     questions_text=questions,
@@ -4713,11 +4686,10 @@ refreshSubmitState();
                     cont_a_instr,
                     "",
                     model=main_model,
-                    max_tokens=n_out_a_cap,
+                    max_tokens=int(n_out_a_cap * 0.9),
                     temperature=0.2
                 )
-                new_items = split_numbered_items(cont_a)
-                a_items += new_items[: (answers_needed - len(a_items))]
+                a_items += split_numbered_items(cont_a)[: (answers_needed - len(a_items))]
 
             # Enforce 1:1 alignment with blueprint length
             if len(a_items) > answers_needed:
@@ -4736,8 +4708,7 @@ refreshSubmitState();
             set_progress(job, 90, step=5, label="Compiling mark scheme")
             if is_canceled(job): return ("Canceled", 499)
             a_tex = tex_from_items(a_items, default_title.title() + " Answers")
-            # NEW: single OpenAI pass to sanitize LaTeX for both docs
-            q_tex, a_tex = sanitize_latex_pair(client, q_tex, a_tex)
+            set_progress(job, 90, step=5, label="Compiling PDFs")
             if is_canceled(job): return ("Canceled", 499)
             q_path = os.path.join(OUTPUT_DIR, "questions.pdf")
             a_path = os.path.join(OUTPUT_DIR, "answers.pdf")
@@ -4745,7 +4716,6 @@ refreshSubmitState();
             # compile sequentially, directly to disk (no giant in-RAM PDFs)
             compile_or_repair_to_path(q_tex, q_path)
             compile_or_repair_to_path(a_tex, a_path)
-            set_progress(job, 90, step=5, label="Compiling PDFs")
             _write_run_meta(
                 mode="exam",
                 title=default_title.title(),
