@@ -157,7 +157,7 @@ pip install werkzeug
 *Example: GCSE Chemistry*
 
 ### 🌐 **Try It Live**
-**[🔗 Live Demo](https://ai-exam-generator-1.onrender.com)** - *No signup required*
+**[🔗 Live Demo](https://ai-exam-generator-0rln.onrender.com)** - *No signup required*
 
 ---
 
@@ -331,7 +331,7 @@ The application logs to stdout with configurable levels. Key events include:
 
 ## 📞 Contact & Deployment
 
-**Live Demo**: https://ai-exam-generator-1.onrender.com
+**Live Demo**: https://ai-exam-generator-0rln.onrender.com
 **GitHub**: https://github.com/ashtondowling
 **LinkedIn**: https://www.linkedin.com/in/ashton-dowling-aa494b333/
 **Email**: ad2424@ic.ac.uk
