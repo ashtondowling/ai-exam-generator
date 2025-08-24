@@ -1868,6 +1868,19 @@ def _sanitize_tex_math(src: str) -> str:
             r'\\frac{\\text{\1}}{\\text{\2}}',
             s
         )
+        # 3.2a) \text{ \frac{A}{B} [^p]? } -> \frac{A}{B[^p]?}
+        #       e.g. \text{ \frac{kg}{m}^3 } -> \frac{kg}{m^3}
+        s = re.sub(
+            r'\\text\s*\{\s*\\frac\s*\{\s*([^{}]+)\s*\}\s*\{\s*([^{}]+)\s*\}\s*(\^\s*(?:\{\s*[^{}]+\s*\}|[0-9]+))?\s*\}',
+            r'\\frac{\1}{\2\3}',
+            s
+        )
+
+        # 3.2b) Units taken out of \text: \text{ m}^3 -> \mathrm{m^{3}}
+        s = re.sub(r'\\text\s*\{\s*([A-Za-z]+)\s*\}\s*\^\s*([0-9]+)', r'\\mathrm{\1^{\2}}', s)
+
+        # 3.2c) Plain units in \text: \text{ kg } -> \mathrm{kg}
+        s = re.sub(r'\\text\s*\{\s*([A-Za-z]+)\s*\}', r'\\mathrm{\1}', s)
 
         # 3.3) \frac{\sqrt}{A}{B} -> \frac{\sqrt{A}}{B}
         s = re.sub(
@@ -2009,6 +2022,9 @@ _BAD_UNIT_FRACS = {
     r'\frac{\text{mol}{dm}^3}': r'\mathrm{mol\,dm^{-3}}',
     r'\frac{\text{g}{cm}^3}': r'\mathrm{g\,cm^{-3}}',
     r'\frac{\text{kg}{m}^3}': r'\mathrm{kg\,m^{-3}}',
+    r'\frac{mol}{dm^3}': r'\mathrm{mol\,dm^{-3}}',
+    r'\frac{g}{cm^3}': r'\mathrm{g\,cm^{-3}}',
+    r'\frac{kg}{m^3}': r'\mathrm{kg\,m^{-3}}',
 }
 # also fix the same pattern when not inside \frac{...}
 _BAD_UNIT_INLINE = {
