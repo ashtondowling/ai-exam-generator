@@ -1,17 +1,3 @@
-import sys, logging
-
-logging.basicConfig(
-    level=logging.INFO,                     # or DEBUG
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-
-# Make sure warnings & unhandled exceptions surface
-logging.captureWarnings(True)
-sys.excepthook = lambda et, ev, tb: (
-    logging.getLogger("UNCAUGHT").exception("Uncaught exception", exc_info=(et, ev, tb))
-)
-
 from dotenv import load_dotenv  # NEW
 
 load_dotenv(override=False)  # NEW – read .env if present, but don't clobber real env
